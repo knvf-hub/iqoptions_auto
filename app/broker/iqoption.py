@@ -81,6 +81,34 @@ class IQOptionBroker:
         self._last_balance = float(self._client.get_balance())
         return self.status()
 
+    def change_account_type(self, account_type: str) -> BrokerStatus:
+        account_type = account_type.upper().strip()
+        if account_type not in {"PRACTICE", "REAL", "TOURNAMENT"}:
+            raise BrokerError("account_type must be PRACTICE, REAL, or TOURNAMENT")
+        client = self._ensure_connected()
+        client.change_balance(account_type)
+        self.config.broker.account_type = account_type
+        self._last_message = f"Switched to {account_type}"
+        return self.refresh_balance()
+
+    def disconnect(self) -> BrokerStatus:
+        client = self._client
+        for target in (client, getattr(client, "api", None)):
+            if target is None:
+                continue
+            for method_name in ("close", "disconnect", "logout"):
+                method = getattr(target, method_name, None)
+                if callable(method):
+                    try:
+                        method()
+                    except Exception:
+                        pass
+                    break
+        self._client = None
+        self._connected = False
+        self._last_message = "IQ Option disconnected"
+        return self.status()
+
     def _ensure_connected(self) -> Any:
         if self._client is None or not self._connected:
             self.connect()

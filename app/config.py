@@ -193,6 +193,7 @@ class ServerConfig(BaseModel):
 class TelegramConfig(BaseModel):
     enabled: bool = False
     follow_signals: bool = False
+    follow_latest_pending: bool = True
     api_id: Union[int, str] = ""
     api_hash: str = ""
     phone: str = ""

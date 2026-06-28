@@ -3,20 +3,15 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.*
 config.yaml
 data/*.db
 data/*.db-*
+data/trading.db
+data/trading.db-*
 data/server.*
 logs/*.log
 
-# local/session files
-data/*.session
-*.session
-.DS_Store
-
-# exported market data
-data/market_exports/
-EOF
 # local/session files
 data/*.session
 *.session

@@ -20,7 +20,12 @@ CUSTOM_MAP = {
     "ARB": "ARBUSD-OTC",
     "BITCOIN": "BTCUSD-op",
     "BITCOINUSD": "BTCUSD-op",
-    "BITCOINUSD-OTC": "BTCUSD-OTC-op",
+    "BITCOINUSD-OTC": "BTCUSD-OTC",
+    "BITCOINCASH": "BCHUSD-OTC",
+    "BITCOINCASH-OTC": "BCHUSD-OTC",
+    "BCH": "BCHUSD-OTC",
+    "BCHUSD": "BCHUSD-OTC",
+    "BCHUSD-OTC": "BCHUSD-OTC",
     "BAIDUINCADR": "BIDU-OTC",
     "BONK": "BONKUSD-OTC",
     "CARDANO": "CARDANO-OTC",
@@ -30,8 +35,8 @@ CUSTOM_MAP = {
     "DECENTRALAND": "MANAUSD-OTC",
     "DOGECOIN": "DOGECOIN-OTC",
     "DOGWIFHAT": "WIFUSD-OTC",
-    "ETHEREUM": "ETHUSD-op",
-    "ETHEREUMUSD": "ETHUSD-op",
+    "ETHEREUM": "ETHUSD-OTC",
+    "ETHEREUMUSD": "ETHUSD-OTC",
     "FARTCOIN": "FARTCOINUSD-OTC",
     "ICP": "ICPUSD-OTC",
     "INJECTIVE": "INJUSD-OTC",
@@ -183,6 +188,7 @@ class TelegramSignalManager:
         data = {
             "enabled": self.config.telegram.enabled,
             "follow_signals": self.config.telegram.follow_signals,
+            "follow_latest_pending": self.config.telegram.follow_latest_pending,
             "running": self._running,
             "channel": self.config.telegram.channel,
             "latest_signal": self._latest_signal,
@@ -195,22 +201,38 @@ class TelegramSignalManager:
             data["summary"] = self.db.telegram_asset_stats(min_signals=self.config.telegram.min_history_signals)
         return data
 
-    async def update_controls(self, *, enabled: bool, follow_signals: bool) -> dict[str, Any]:
+    async def update_controls(
+        self,
+        *,
+        enabled: bool,
+        follow_signals: bool,
+        follow_latest_pending: bool = True,
+    ) -> dict[str, Any]:
         was_enabled = self.config.telegram.enabled
         was_following = self.config.telegram.follow_signals
         self.config.telegram.enabled = bool(enabled)
         self.config.telegram.follow_signals = bool(follow_signals)
+        self.config.telegram.follow_latest_pending = bool(follow_latest_pending)
+        self.engine.config.telegram.enabled = self.config.telegram.enabled
+        self.engine.config.telegram.follow_signals = self.config.telegram.follow_signals
+        self.engine.config.telegram.follow_latest_pending = self.config.telegram.follow_latest_pending
         if self.config.telegram.enabled:
             await self.start()
         else:
             await self.stop()
         if self.config.telegram.enabled and self.config.telegram.follow_signals and (not was_enabled or not was_following):
-            self.schedule_prime_latest_pending_signal()
+            await self.engine.activate_telegram_follow_mode()
+            if self.config.telegram.follow_latest_pending:
+                self.schedule_prime_latest_pending_signal()
         self.db.add_event(
             "info",
             "telegram",
             "Telegram controls updated",
-            {"enabled": self.config.telegram.enabled, "follow_signals": self.config.telegram.follow_signals},
+            {
+                "enabled": self.config.telegram.enabled,
+                "follow_signals": self.config.telegram.follow_signals,
+                "follow_latest_pending": self.config.telegram.follow_latest_pending,
+            },
         )
         return self.status()
 
@@ -315,10 +337,14 @@ class TelegramSignalManager:
         runtime_path = self._resolve_path(self.config.telegram.runtime_state_path)
         try:
             runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
-            symbols.update(str(item) for item in runtime.get("open_symbols", []) if item)
+            symbols.update(
+                str(item)
+                for item in runtime.get("open_symbols", [])
+                if item and not str(item).endswith("-op")
+            )
         except (OSError, json.JSONDecodeError):
             pass
-        return symbols
+        return {symbol for symbol in symbols if symbol and not symbol.endswith("-op")}
 
     def _resolve_path(self, value: str) -> Path:
         path = Path(value)
@@ -363,7 +389,7 @@ class TelegramSignalManager:
 
             self._last_error = None
             self.db.add_event("info", "telegram", "Telegram listener started", {"channel": channel_filter})
-            if self.config.telegram.follow_signals or self._prime_on_connect:
+            if self.config.telegram.follow_signals and self.config.telegram.follow_latest_pending:
                 self.schedule_prime_latest_pending_signal()
             await client.run_until_disconnected()
         except asyncio.CancelledError:
@@ -529,8 +555,12 @@ class TelegramSignalManager:
             return
         signal_key = self._signal_key(signal)
         if signal_key in self._scheduled_signal_keys:
-            self._latest_signal = {**signal, "order_status": "skipped", "order_message": "duplicate_signal_already_scheduled"}
-            self.db.add_event("info", "telegram", "Telegram signal skipped because it is already scheduled", self._latest_signal)
+            self._latest_signal = {
+                **signal,
+                "order_status": "waiting",
+                "order_message": "already_scheduled_waiting_for_entry_time",
+            }
+            self.db.add_event("info", "telegram", "Telegram signal already scheduled", self._latest_signal)
             return
         self._scheduled_signal_keys.add(signal_key)
         self._latest_signal = {**signal, "order_status": "waiting", "order_message": "waiting_for_entry_time"}
@@ -555,10 +585,13 @@ class TelegramSignalManager:
         broker_items = await self._broker_assets()
         for candidate in candidates:
             for item in broker_items:
+                active_ids = item.get("active_ids") if isinstance(item.get("active_ids"), dict) else {}
+                raw_types = item.get("raw_types") if isinstance(item.get("raw_types"), list) else []
                 if (
                     str(item.get("name")) == candidate
                     and str(item.get("type", "")).lower() == instrument
                     and bool(item.get("open"))
+                    and (instrument in active_ids or instrument in raw_types)
                 ):
                     return {
                         "symbol": candidate,

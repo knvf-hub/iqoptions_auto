@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Login · IQ Auto Trader</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=20260621-port-icon" />
+    <script>
+      document.documentElement.dataset.theme = localStorage.getItem("iq-auto-theme") || "light";
+    </script>
+    <link rel="stylesheet" href="/static/styles.css?v=20260628-history-summary-modal-map-v1" />
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+    <script src="/static/login.js?v=20260628-history-summary-modal-map-v1" defer></script>
+  </head>
+  <body>
+    <main class="login-shell">
+      <section class="panel login-panel">
+        <div class="login-head">
+          <div>
+            <h1>IQ Auto Trader</h1>
+            <div class="subline">
+              <span class="badge warning">IQOPTION</span>
+              <span class="badge success">SECURE LOGIN</span>
+            </div>
+          </div>
+          <button id="loginThemeToggleBtn" class="icon-btn" type="button" title="Switch theme" aria-label="Switch theme">
+            <i data-lucide="moon"></i>
+          </button>
+        </div>
+
+        <form id="loginForm" class="login-form">
+          <label>
+            <span>Email</span>
+            <input id="emailInput" type="email" autocomplete="username" required />
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="passwordInput" type="password" autocomplete="current-password" required />
+          </label>
+          <label>
+            <span>Account</span>
+            <select id="accountTypeInput">
+              <option value="PRACTICE">Practice</option>
+              <option value="REAL">Real</option>
+            </select>
+          </label>
+          <label>
+            <span>2FA Code</span>
+            <input id="twoFactorInput" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Optional" />
+          </label>
+          <button id="loginSubmitBtn" class="btn primary login-submit" type="submit">
+            <span class="btn-spinner" aria-hidden="true"></span>
+            <i data-lucide="log-in"></i><span data-label>Login</span>
+          </button>
+          <p id="loginError" class="form-error" role="alert" hidden></p>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

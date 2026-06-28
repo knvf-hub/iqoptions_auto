@@ -3,13 +3,29 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def bangkok_day_range_utc(now: Optional[datetime] = None) -> tuple[str, str, str]:
+    bangkok_tz = ZoneInfo("Asia/Bangkok")
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    bangkok_now = current.astimezone(bangkok_tz)
+    day_start = datetime.combine(bangkok_now.date(), time.min, tzinfo=bangkok_tz)
+    day_end = day_start + timedelta(days=1)
+    return (
+        day_start.astimezone(timezone.utc).isoformat(timespec="seconds"),
+        day_end.astimezone(timezone.utc).isoformat(timespec="seconds"),
+        bangkok_now.date().isoformat(),
+    )
 
 
 class Database:
@@ -627,9 +643,14 @@ class Database:
         return cooldowns
 
     def daily_stats(self, *, since: Optional[str] = None) -> dict[str, Any]:
-        today = utc_now()[:10]
-        where_clause = "created_at >= ?" if since else "substr(created_at, 1, 10) = ?"
-        where_value = since or today
+        if since:
+            today = bangkok_day_range_utc()[2]
+            where_clause = "created_at >= ?"
+            where_params: tuple[Any, ...] = (since,)
+        else:
+            start_utc, end_utc, today = bangkok_day_range_utc()
+            where_clause = "created_at >= ? AND created_at < ?"
+            where_params = (start_utc, end_utc)
         with self._lock, self._connect() as db:
             row = db.execute(
                 f"""
@@ -642,7 +663,7 @@ class Database:
                 FROM trades
                 WHERE {where_clause}
                 """,
-                (where_value,),
+                where_params,
             ).fetchone()
             last = db.execute(
                 f"""
@@ -652,7 +673,7 @@ class Database:
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
-                (where_value,),
+                where_params,
             ).fetchone()
             recent_closed = db.execute(
                 f"""
@@ -663,7 +684,7 @@ class Database:
                 ORDER BY closed_at DESC, id DESC
                 LIMIT 20
                 """,
-                (where_value,),
+                where_params,
             ).fetchall()
         consecutive_losses = 0
         for closed in recent_closed:

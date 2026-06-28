@@ -9,9 +9,9 @@
   <script>
     document.documentElement.dataset.theme = localStorage.getItem("iq-auto-theme") || "light";
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=20260624-local-clock-v2" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260628-history-summary-modal-map-v1" />
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-  <script src="/static/app.js?v=20260624-local-clock-v2" defer></script>
+  <script src="/static/app.js?v=20260628-history-summary-modal-map-v1" defer></script>
 </head>
 
 <body>
@@ -37,6 +37,16 @@
         <a class="btn" href="/export" title="Export market candles">
           <i data-lucide="download"></i><span>Export</span>
         </a>
+        <label class="topbar-select-wrap" title="Switch IQ Option balance">
+          <span>Account</span>
+          <select id="accountTypeSelect" class="topbar-select">
+            <option value="PRACTICE">Practice</option>
+            <option value="REAL">Real</option>
+          </select>
+        </label>
+        <button id="logoutBtn" class="btn" type="button" title="Logout and clear broker credentials">
+          <i data-lucide="log-out"></i><span>Logout</span>
+        </button>
         <button id="resetStatsBtn" class="btn" type="button" title="Reset dashboard stats">
           <i data-lucide="history"></i><span>Reset Stats</span>
         </button>
@@ -231,6 +241,15 @@
                 <option value="50">50 rows</option>
                 <option value="100">100 rows</option>
               </select>
+              <div class="pager">
+                <button id="historyPrevBtn" class="icon-btn" type="button" title="Previous page">
+                  <i data-lucide="chevron-left"></i>
+                </button>
+                <span id="historyPageLabel">1</span>
+                <button id="historyNextBtn" class="icon-btn" type="button" title="Next page">
+                  <i data-lucide="chevron-right"></i>
+                </button>
+              </div>
               <button id="clearHistoryBtn" class="icon-btn danger-outline" type="button" title="Clear history">
                 <i data-lucide="trash-2"></i>
               </button>
@@ -256,7 +275,25 @@
         <div class="asset-summary">
           <div class="asset-summary-head">
             <h3>Pair Summary</h3>
-            <span id="assetSummaryMode" class="muted">Session by asset and side</span>
+            <div class="asset-summary-tools">
+              <span id="assetSummaryMode" class="muted">Session by asset and side</span>
+              <div id="summaryFilter" class="summary-filter">
+                <button id="summaryFilterButton" class="btn summary-filter-button" type="button">
+                  <i data-lucide="list-filter"></i><span id="summaryFilterText">All assets</span>
+                </button>
+                <div id="summaryFilterMenu" class="summary-filter-menu" hidden>
+                  <div class="combo-search">
+                    <i data-lucide="search"></i>
+                    <input id="summarySearchInput" type="search" placeholder="Search assets" autocomplete="off" />
+                  </div>
+                  <div class="summary-filter-actions">
+                    <button id="summarySelectAllBtn" type="button">All</button>
+                    <button id="summaryClearBtn" type="button">Clear</button>
+                  </div>
+                  <div id="summaryFilterOptions" class="summary-filter-options"></div>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="table-wrap compact-table-wrap">
             <table>

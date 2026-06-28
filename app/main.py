@@ -115,6 +115,34 @@ class MarketExportRequest(BaseModel):
 class TelegramControlsRequest(BaseModel):
     enabled: bool = False
     follow_signals: bool = False
+    follow_latest_pending: bool = True
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=256)
+    account_type: str = "PRACTICE"
+    two_factor_code: str = ""
+
+    @field_validator("account_type")
+    @classmethod
+    def validate_account_type(cls, value: str) -> str:
+        value = value.upper().strip()
+        if value not in {"PRACTICE", "REAL"}:
+            raise ValueError("account_type must be PRACTICE or REAL")
+        return value
+
+
+class AccountTypeRequest(BaseModel):
+    account_type: str
+
+    @field_validator("account_type")
+    @classmethod
+    def validate_account_type(cls, value: str) -> str:
+        value = value.upper().strip()
+        if value not in {"PRACTICE", "REAL"}:
+            raise ValueError("account_type must be PRACTICE or REAL")
+        return value
 
 
 def create_app() -> FastAPI:
@@ -158,7 +186,11 @@ def create_app() -> FastAPI:
     async def start_bot() -> dict:
         try:
             result = await engine.start()
-            if config.telegram.enabled and config.telegram.follow_signals:
+            if (
+                engine.config.telegram.enabled
+                and engine.config.telegram.follow_signals
+                and engine.config.telegram.follow_latest_pending
+            ):
                 telegram_manager.schedule_prime_latest_pending_signal()
             return result
         except BrokerError as exc:
@@ -251,6 +283,29 @@ def create_app() -> FastAPI:
     async def update_telegram_controls(payload: TelegramControlsRequest) -> dict:
         return await telegram_manager.update_controls(**payload.model_dump())
 
+    @app.post("/api/auth/login")
+    async def login(payload: LoginRequest) -> dict:
+        try:
+            return await engine.login(**payload.model_dump())
+        except BrokerError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/auth/logout")
+    async def logout() -> dict:
+        try:
+            await telegram_manager.update_controls(enabled=False, follow_signals=False)
+            telegram_manager.cancel_pending_orders()
+            return await engine.logout()
+        except BrokerError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/broker/account-type")
+    async def switch_account_type(payload: AccountTypeRequest) -> dict:
+        try:
+            return await engine.switch_account_type(payload.account_type)
+        except BrokerError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/api/telegram/import-history")
     async def import_telegram_history() -> dict:
         return telegram_manager.import_history()
@@ -319,6 +374,10 @@ def create_app() -> FastAPI:
     @app.get("/")
     async def index() -> FileResponse:
         return FileResponse(static_dir / "index.html", headers={"Cache-Control": "no-store"})
+
+    @app.get("/login")
+    async def login_page() -> FileResponse:
+        return FileResponse(static_dir / "login.html", headers={"Cache-Control": "no-store"})
 
     @app.get("/export")
     async def export_page() -> FileResponse:

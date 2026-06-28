@@ -10,8 +10,13 @@ const state = {
   assets: [],
   telegram: null,
   telegramSignals: [],
+  assetStatsRaw: [],
+  summarySelectedAssets: new Set(),
+  summarySearch: "",
   selectedAsset: "",
   lastAutoSignalAt: "",
+  historyOffset: 0,
+  historyLastCount: 0,
   eventsOffset: 0,
   eventsLimit: 20,
   eventsHasMore: true,
@@ -90,6 +95,56 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function confirmDialog({
+  title = "Confirm action",
+  message = "",
+  confirmText = "Confirm",
+  cancelText = "Cancel",
+  variant = "primary",
+} = {}) {
+  return new Promise((resolve) => {
+    document.querySelector(".confirm-backdrop")?.remove();
+    const backdrop = document.createElement("div");
+    backdrop.className = "confirm-backdrop";
+    backdrop.innerHTML = `
+      <section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+        <div class="confirm-icon ${escapeHtml(variant)}">
+          <i data-lucide="${variant === "danger" ? "alert-triangle" : "shield-check"}"></i>
+        </div>
+        <div class="confirm-copy">
+          <h2 id="confirmTitle">${escapeHtml(title)}</h2>
+          <p>${escapeHtml(message)}</p>
+        </div>
+        <div class="confirm-actions">
+          <button class="btn confirm-cancel" type="button">${escapeHtml(cancelText)}</button>
+          <button class="btn ${variant === "danger" ? "danger" : "primary"} confirm-ok" type="button">
+            ${escapeHtml(confirmText)}
+          </button>
+        </div>
+      </section>
+    `;
+    document.body.appendChild(backdrop);
+    if (window.lucide) window.lucide.createIcons();
+
+    const done = (value) => {
+      document.removeEventListener("keydown", onKeyDown);
+      backdrop.remove();
+      resolve(value);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") done(false);
+      if (event.key === "Enter") done(true);
+    };
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) done(false);
+    });
+    backdrop.querySelector(".confirm-cancel").addEventListener("click", () => done(false));
+    backdrop.querySelector(".confirm-ok").addEventListener("click", () => done(true));
+    document.addEventListener("keydown", onKeyDown);
+    backdrop.querySelector(".confirm-ok").focus();
+  });
 }
 
 const REASON_TH = {
@@ -406,6 +461,10 @@ function renderStatus(status) {
   setBadge($("#modeBadge"), (broker.mode || "demo").toUpperCase(), broker.mode === "iqoption" ? "warning" : "neutral");
   setBadge($("#accountBadge"), broker.account_type || "PRACTICE", broker.account_type === "REAL" ? "danger" : "success");
   setBadge($("#connectionBadge"), broker.connected ? "online" : "offline", broker.connected ? "success" : "danger");
+  const accountTypeSelect = $("#accountTypeSelect");
+  if (accountTypeSelect && broker.account_type && accountTypeSelect.value !== broker.account_type) {
+    accountTypeSelect.value = broker.account_type;
+  }
 
   const runningState = $("#runningState");
   runningState.textContent = status.running ? "running" : "stopped";
@@ -570,10 +629,12 @@ function telegramStatusClass(status, mapped) {
 
 function renderTrades(items) {
   state.trades = items;
+  state.historyLastCount = items.length;
   const body = $("#tradesBody");
   body.innerHTML = "";
   if (!items.length) {
     body.innerHTML = `<tr><td colspan="7" class="reason-cell">No trades yet</td></tr>`;
+    renderHistoryPagination();
     return;
   }
 
@@ -583,7 +644,7 @@ function renderTrades(items) {
     if (isOpen) row.className = "open-trade-row";
     row.innerHTML = `
       <td>${localTime(trade.created_at)}</td>
-      <td>${trade.asset}</td>
+      <td>${escapeHtml(trade.asset)}</td>
       <td>${String(trade.direction || "").toUpperCase()}</td>
       <td>${money(trade.amount)}</td>
       <td>${renderTradeStatus(trade)}</td>
@@ -593,6 +654,65 @@ function renderTrades(items) {
     body.appendChild(row);
   }
   updateCountdowns();
+  renderHistoryPagination();
+}
+
+function renderHistoryPagination() {
+  const limit = Number($("#historyLimit")?.value || 50);
+  const page = Math.floor(state.historyOffset / limit) + 1;
+  const prev = $("#historyPrevBtn");
+  const next = $("#historyNextBtn");
+  const label = $("#historyPageLabel");
+  if (label) label.textContent = `Page ${page}`;
+  if (prev) prev.disabled = state.historyOffset <= 0;
+  if (next) next.disabled = state.historyLastCount < limit;
+}
+
+function changeHistoryPage(delta) {
+  const limit = Number($("#historyLimit")?.value || 50);
+  state.historyOffset = Math.max(0, state.historyOffset + delta * limit);
+  refreshAll({ force: true });
+}
+
+function resetHistoryPage() {
+  state.historyOffset = 0;
+  refreshAll({ force: true });
+}
+
+function renderSummaryFilter(allRows = []) {
+  const assets = [...new Set(allRows.map((item) => String(item.asset || "").trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right));
+  for (const selected of [...state.summarySelectedAssets]) {
+    if (!assets.includes(selected)) state.summarySelectedAssets.delete(selected);
+  }
+  const text = $("#summaryFilterText");
+  if (text) {
+    const count = state.summarySelectedAssets.size;
+    text.textContent = count ? `${count} selected` : "All assets";
+  }
+  const options = $("#summaryFilterOptions");
+  if (!options) return;
+  const search = state.summarySearch.trim().toLowerCase();
+  const visibleAssets = assets.filter((asset) => asset.toLowerCase().includes(search));
+  options.innerHTML = "";
+  if (!visibleAssets.length) {
+    options.innerHTML = `<div class="combo-empty">No assets</div>`;
+    return;
+  }
+  for (const asset of visibleAssets) {
+    const label = document.createElement("label");
+    label.className = "summary-filter-option";
+    label.innerHTML = `
+      <input type="checkbox" value="${escapeHtml(asset)}" ${state.summarySelectedAssets.has(asset) ? "checked" : ""} />
+      <span>${escapeHtml(asset)}</span>
+    `;
+    label.querySelector("input").addEventListener("change", (event) => {
+      if (event.target.checked) state.summarySelectedAssets.add(asset);
+      else state.summarySelectedAssets.delete(asset);
+      renderAssetStats(state.assetStatsRaw, state.status?.config || {});
+    });
+    options.appendChild(label);
+  }
 }
 
 function renderAssetStats(items = [], config = {}) {
@@ -637,16 +757,21 @@ function renderAssetStats(items = [], config = {}) {
     if (leftDirection !== rightDirection) return leftDirection - rightDirection;
     return String(left.direction || "").localeCompare(String(right.direction || ""));
   });
-  state.assetStats = sortedItems;
+  state.assetStatsRaw = sortedItems;
+  renderSummaryFilter(sortedItems);
+  const filteredItems = state.summarySelectedAssets.size
+    ? sortedItems.filter((item) => state.summarySelectedAssets.has(String(item.asset || "")))
+    : sortedItems;
+  state.assetStats = filteredItems;
   const body = $("#assetStatsBody");
   if (!body) return;
   body.innerHTML = "";
-  if (!sortedItems.length) {
+  if (!filteredItems.length) {
     body.innerHTML = `<tr><td colspan="8" class="reason-cell">No pair stats yet</td></tr>`;
     return;
   }
 
-  for (const item of sortedItems) {
+  for (const item of filteredItems) {
     const direction = String(item.direction || "").toLowerCase();
     const enabled = isAssetDirectionEnabled(rules[item.asset], direction);
     const profit = Number(item.profit || 0);
@@ -1026,7 +1151,7 @@ async function refreshAll({ keepInputs = true, force = false } = {}) {
     const status = await api("/api/status");
     const summarySource = status.telegram?.follow_signals ? "&source=telegram" : "";
     const [trades, openTrades, equity, assetStats, telegramSignals] = await Promise.all([
-      api(`/api/trades?limit=${encodeURIComponent(historyLimit)}${statusFilter ? `&status=${encodeURIComponent(statusFilter)}` : ""}`),
+      api(`/api/trades?limit=${encodeURIComponent(historyLimit)}&offset=${encodeURIComponent(state.historyOffset)}${statusFilter ? `&status=${encodeURIComponent(statusFilter)}` : ""}`),
       api("/api/trades?limit=5&status=open"),
       api("/api/equity?limit=500&scope=session"),
       api(`/api/stats/assets?scope=session${summarySource}`),
@@ -1131,7 +1256,12 @@ async function toggleAssetDirection(asset, direction) {
 }
 
 async function clearHistory() {
-  const confirmed = window.confirm("Clear trade history, signals, events, and reset stats?");
+  const confirmed = await confirmDialog({
+    title: "Clear history?",
+    message: "Trade history, signals, events, and dashboard stats will be cleared.",
+    confirmText: "Clear",
+    variant: "danger",
+  });
   if (!confirmed) return;
   try {
     const result = await api("/api/history/clear", { method: "POST", timeoutMs: 10000 });
@@ -1149,7 +1279,11 @@ async function clearHistory() {
 }
 
 async function resetStats() {
-  const confirmed = window.confirm("Reset dashboard stats from now? Trade history will stay.");
+  const confirmed = await confirmDialog({
+    title: "Reset stats?",
+    message: "Dashboard stats will restart from now. Trade history will stay.",
+    confirmText: "Reset",
+  });
   if (!confirmed) return;
   try {
     const status = await api("/api/stats/reset", { method: "POST", timeoutMs: 10000 });
@@ -1157,6 +1291,56 @@ async function resetStats() {
     await refreshAll({ force: true });
     await loadEvents({ reset: true });
     showToast("Stats reset");
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function switchAccountType() {
+  const select = $("#accountTypeSelect");
+  if (!select) return;
+  const previous = state.status?.broker?.account_type || "PRACTICE";
+  const next = select.value;
+  if (next === previous) return;
+  if (next === "REAL") {
+    const confirmed = await confirmDialog({
+      title: "Switch to REAL?",
+      message: "Orders will use the real IQ Option balance after switching.",
+      confirmText: "Switch",
+      variant: "danger",
+    });
+    if (!confirmed) {
+      select.value = previous;
+      return;
+    }
+  }
+  try {
+    const status = await api("/api/broker/account-type", {
+      method: "POST",
+      body: JSON.stringify({ account_type: next }),
+      timeoutMs: 20000,
+    });
+    renderStatus(status);
+    await refreshAll({ force: true });
+    await loadEvents({ reset: true });
+    showToast(`Switched to ${next}`);
+  } catch (error) {
+    select.value = previous;
+    showToast(error.message);
+  }
+}
+
+async function logout() {
+  const confirmed = await confirmDialog({
+    title: "Logout?",
+    message: "The bot will stop and broker credentials will be cleared from memory.",
+    confirmText: "Logout",
+    variant: "danger",
+  });
+  if (!confirmed) return;
+  try {
+    await api("/api/auth/logout", { method: "POST", timeoutMs: 15000 });
+    window.location.href = "/login";
   } catch (error) {
     showToast(error.message);
   }
@@ -1202,6 +1386,8 @@ function bindEvents() {
   $("#tickBtn").addEventListener("click", () => postAction("/api/bot/tick", "Tick complete", "tick"));
   $("#reloadBtn").addEventListener("click", () => postAction("/api/config/reload", "Config reloaded"));
   $("#themeToggleBtn")?.addEventListener("click", toggleTheme);
+  $("#accountTypeSelect")?.addEventListener("change", switchAccountType);
+  $("#logoutBtn")?.addEventListener("click", logout);
   $("#resetStatsBtn")?.addEventListener("click", resetStats);
   $("#callBtn").addEventListener("click", () => manualTrade("call"));
   $("#putBtn").addEventListener("click", () => manualTrade("put"));
@@ -1210,8 +1396,32 @@ function bindEvents() {
   $("#martingale3StepInput").addEventListener("change", () => syncMartingaleMode("three_step"));
   $("#telegramEnabledInput").addEventListener("change", syncTelegramControls);
   $("#telegramFollowInput").addEventListener("change", syncTelegramControls);
-  $("#statusFilter").addEventListener("change", () => refreshAll());
-  $("#historyLimit").addEventListener("change", () => refreshAll());
+  $("#statusFilter").addEventListener("change", resetHistoryPage);
+  $("#historyLimit").addEventListener("change", resetHistoryPage);
+  $("#historyPrevBtn")?.addEventListener("click", () => changeHistoryPage(-1));
+  $("#historyNextBtn")?.addEventListener("click", () => changeHistoryPage(1));
+  $("#summaryFilterButton")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const menu = $("#summaryFilterMenu");
+    if (menu) menu.hidden = !menu.hidden;
+  });
+  $("#summarySearchInput")?.addEventListener("input", (event) => {
+    state.summarySearch = event.target.value;
+    renderSummaryFilter(state.assetStatsRaw);
+  });
+  $("#summarySelectAllBtn")?.addEventListener("click", () => {
+    state.summarySelectedAssets.clear();
+    renderAssetStats(state.assetStatsRaw, state.status?.config || {});
+  });
+  $("#summaryClearBtn")?.addEventListener("click", () => {
+    state.summarySelectedAssets.clear();
+    renderAssetStats(state.assetStatsRaw, state.status?.config || {});
+  });
+  document.addEventListener("click", (event) => {
+    const filter = $("#summaryFilter");
+    const menu = $("#summaryFilterMenu");
+    if (filter && menu && !filter.contains(event.target)) menu.hidden = true;
+  });
   $("#eventsScroller").addEventListener("scroll", () => {
     const scroller = $("#eventsScroller");
     const nearBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 80;
@@ -1274,5 +1484,3 @@ document.addEventListener("DOMContentLoaded", async () => {
     window.lucide.createIcons();
   }
 });
-
-

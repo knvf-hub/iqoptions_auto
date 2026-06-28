@@ -183,6 +183,141 @@ class TradingEngine:
     def _telegram_follow_mode_active(self) -> bool:
         return bool(self.config.telegram.enabled and self.config.telegram.follow_signals)
 
+    async def activate_telegram_follow_mode(self) -> None:
+        async with self._lock:
+            self._strategy_martingale_pending = None
+            self.db.delete_state(STRATEGY_MARTINGALE_STATE_KEY)
+            self._last_error = "telegram_follow_mode"
+            self._last_signal = {
+                "asset": "",
+                "label": "telegram",
+                "action": "wait",
+                "confidence": 0.0,
+                "reason": "telegram_follow_mode",
+                "tradable": False,
+                "reject_reason": "telegram_follow_mode",
+                "eligible_count": 0,
+                "rejections": [],
+                "close_price": None,
+                "metrics": {"source": "telegram"},
+                "top_candidate": None,
+                "auto_select_asset": False,
+                "candidates": [],
+                "created_at": utc_now(),
+            }
+            self.db.add_event(
+                "info",
+                "telegram",
+                "Telegram follow mode activated; strategy martingale cleared",
+                {},
+            )
+
+    async def login(
+        self,
+        *,
+        email: str,
+        password: str,
+        account_type: str = "PRACTICE",
+        two_factor_code: str = "",
+    ) -> dict[str, Any]:
+        if self._running:
+            await self.stop()
+        account_type = account_type.upper().strip()
+        if account_type not in {"PRACTICE", "REAL"}:
+            raise BrokerError("account_type must be PRACTICE or REAL")
+        if not email.strip() or not password:
+            raise BrokerError("email_and_password_required")
+
+        async with self._lock:
+            self.config.broker.mode = "iqoption"
+            self.config.broker.email = email.strip()
+            self.config.broker.password = password
+            self.config.broker.two_factor_code = two_factor_code.strip()
+            self.config.broker.account_type = account_type
+            await self._safe_reset_broker(reason="login")
+            try:
+                broker_status = await asyncio.wait_for(
+                    asyncio.to_thread(self._broker.connect),
+                    timeout=self.config.broker.connect_timeout_sec,
+                )
+            except asyncio.TimeoutError as exc:
+                self._last_error = f"broker_connect_timeout_after_{self.config.broker.connect_timeout_sec}s"
+                self._last_broker_status = self.broker_status()
+                self.db.add_event(
+                    "error",
+                    "broker",
+                    "Login connect timed out",
+                    {"timeout_sec": self.config.broker.connect_timeout_sec},
+                )
+                raise BrokerError(self._last_error) from exc
+            except Exception as exc:
+                self._last_error = str(exc)
+                self._last_broker_status = self.broker_status()
+                self.db.add_event("error", "broker", "Login failed", {"error": str(exc)})
+                raise BrokerError(str(exc)) from exc
+            self._last_broker_status = await self._refresh_connected_broker_status(broker_status)
+            self._last_error = None
+            self.db.add_event("info", "broker", "Logged in", {"account_type": account_type})
+        return self.status()
+
+    async def logout(self) -> dict[str, Any]:
+        if self._running:
+            await self.stop()
+        async with self._lock:
+            old_broker = self._broker
+            for method_name in ("disconnect", "close", "logout"):
+                method = getattr(old_broker, method_name, None)
+                if not callable(method):
+                    continue
+                try:
+                    await asyncio.wait_for(asyncio.to_thread(method), timeout=3)
+                    break
+                except Exception as exc:
+                    self.db.add_event(
+                        "warning",
+                        "broker",
+                        "Logout disconnect failed",
+                        {"method": method_name, "error": str(exc)},
+                    )
+                    break
+            self.config.broker.email = ""
+            self.config.broker.password = ""
+            self.config.broker.two_factor_code = ""
+            self._broker = self._build_broker(self.config)
+            self._last_broker_status = self.broker_status()
+            self._last_error = None
+            self.db.add_event("info", "broker", "Logged out", {})
+        return self.status(include_broker=False)
+
+    async def switch_account_type(self, account_type: str) -> dict[str, Any]:
+        account_type = account_type.upper().strip()
+        if account_type not in {"PRACTICE", "REAL"}:
+            raise BrokerError("account_type must be PRACTICE or REAL")
+        async with self._lock:
+            self.config.broker.account_type = account_type
+            self._broker.config = self.config
+            change_account_type = getattr(self._broker, "change_account_type", None)
+            try:
+                if callable(change_account_type):
+                    broker_status = await asyncio.wait_for(
+                        asyncio.to_thread(change_account_type, account_type),
+                        timeout=self.config.broker.connect_timeout_sec,
+                    )
+                else:
+                    await self._safe_reset_broker(reason="account_type_switch")
+                    broker_status = await asyncio.wait_for(
+                        asyncio.to_thread(self._broker.connect),
+                        timeout=self.config.broker.connect_timeout_sec,
+                    )
+                self._last_broker_status = await self._refresh_connected_broker_status(broker_status)
+            except Exception as exc:
+                self._last_error = str(exc)
+                self._last_broker_status = self.broker_status()
+                self.db.add_event("error", "broker", "Account type switch failed", {"error": str(exc)})
+                raise BrokerError(str(exc)) from exc
+            self.db.add_event("info", "broker", "Account type switched", {"account_type": account_type})
+        return self.status()
+
     async def settle_due_trades(self) -> dict[str, Any]:
         async with self._lock:
             self._last_tick_at = utc_now()
