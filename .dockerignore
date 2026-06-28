@@ -1,0 +1,15 @@
+.venv
+venv
+__pycache__
+*.py[cod]
+
+.git
+.gitignore
+
+config.yaml
+.env
+
+data
+logs
+
+.DS_Store

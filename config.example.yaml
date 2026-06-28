@@ -1,0 +1,148 @@
+broker:
+  mode: demo
+  account_type: PRACTICE
+  email: ""
+  password: ""
+  two_factor_code: ""
+  connect_timeout_sec: 12
+
+trading:
+  enabled_on_start: false
+  asset: EURUSD-OTC
+  auto_select_asset: true
+  assets:
+    - EURUSD-OTC
+    - GBPUSD-OTC
+    - USDJPY-OTC
+    - EURJPY-OTC
+    - AUDCAD-OTC
+    - AUDJPY-OTC
+    - ALIBABA-OTC
+    - CASINOS-OTC
+    - ETHUSD-OTC
+    - ONDOUSD-OTC
+    - OpenAI-OTC
+    - SP500-OTC
+  instrument: binary
+  amount: 1.0
+  duration_minutes: 1
+  candle_interval_sec: 60
+  lookback_candles: 120
+  poll_interval_sec: 5
+  signal_scan_timeout_sec: 20
+  order_timeout_sec: 12
+  martingale_enabled: false
+  strategy: asset_specific
+  min_confidence: 0.62
+  min_abs_momentum: 0.0002
+  max_atr_ratio: 0.0005
+  max_rsi: 65.0
+  blocked_asset_directions:
+    - EURUSD-OTC:put
+    - GBPUSD-OTC:call
+  asset_rules:
+    EURJPY-OTC:
+      enabled: true
+      allow_directions:
+        - put
+      min_confidence: 0.68
+      min_abs_momentum: 0.0002
+      max_atr_ratio: 0.00035
+      max_rsi: 65.0
+    GBPUSD-OTC:
+      enabled: true
+      allow_directions:
+        - put
+      min_confidence: 0.65
+      min_abs_momentum: 0.0002
+      max_atr_ratio: 0.0005
+      max_rsi: 65.0
+    AUDCAD-OTC:
+      enabled: true
+      allow_directions:
+        - call
+      min_confidence: 0.75
+      min_abs_momentum: 0.0003
+      max_atr_ratio: 0.00035
+      min_rsi: 50.0
+      max_rsi: 62.0
+    EURUSD-OTC:
+      enabled: true
+      allow_directions:
+        - call
+      min_confidence: 0.75
+      min_abs_momentum: 0.0003
+      max_atr_ratio: 0.00035
+      min_rsi: 50.0
+      max_rsi: 63.0
+    USDJPY-OTC:
+      enabled: true
+      allow_directions:
+        - call
+        - put
+      min_confidence: 0.78
+      min_abs_momentum: 0.0003
+      max_atr_ratio: 0.00035
+      max_rsi: 65.0
+    CASINOS-OTC:
+      enabled: true
+      allow_directions:
+        - call
+        - put
+      min_confidence: 0.7
+      min_abs_momentum: 0.00012
+      max_atr_ratio: 0.0012
+      min_rsi: 28.0
+      max_rsi: 78.0
+    ETHUSD-OTC:
+      enabled: true
+      allow_directions:
+        - call
+        - put
+      min_confidence: 0.7
+      min_abs_momentum: 0.00012
+      max_atr_ratio: 0.0012
+      min_rsi: 28.0
+      max_rsi: 78.0
+    SP500-OTC:
+      enabled: true
+      allow_directions:
+        - call
+        - put
+      min_confidence: 0.7
+      min_abs_momentum: 0.00012
+      max_atr_ratio: 0.0012
+      min_rsi: 28.0
+      max_rsi: 78.0
+  one_open_trade_at_a_time: true
+
+risk:
+  max_trade_amount: 0.0
+  max_daily_loss: 1000.0
+  take_profit: 0.0
+  max_trades_per_day: 0
+  cooldown_sec: 45
+  stop_after_consecutive_losses: 0
+  allow_real_balance: false
+
+storage:
+  sqlite_path: data/trading.db
+
+server:
+  host: 127.0.0.1
+  port: 8887
+
+telegram:
+  enabled: false
+  follow_signals: false
+  api_id: ""
+  api_hash: ""
+  phone: ""
+  channel: "SALA IQ VIP (Thailand)"
+  session_path: /app/telegram_session.session
+  source_logs_path: data/telegram_source_logs/signal_dataset
+  runtime_state_path: data/telegram_source_logs/telegram_runtime_state.json
+  entry_lead_seconds: 1.0
+  min_history_signals: 3
+  import_history_limit: 2500
+  default_expiry_minutes: 1

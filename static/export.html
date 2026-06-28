@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Market Export · IQ Auto Trader</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=20260621-port-icon" />
+    <script>
+      document.documentElement.dataset.theme = localStorage.getItem("iq-auto-theme") || "light";
+    </script>
+    <link rel="stylesheet" href="/static/styles.css?v=20260623-export-assets-retry" />
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+    <script src="/static/export.js?v=20260623-export-assets-retry" defer></script>
+  </head>
+  <body>
+    <div class="app-shell export-shell">
+      <header class="topbar">
+        <div>
+          <h1>Market Export</h1>
+          <div class="subline">
+            <span class="badge warning">IQOPTION</span>
+            <span class="badge success">CSV</span>
+            <span id="exportConnectionBadge" class="badge danger">offline</span>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="exportThemeToggleBtn" class="icon-btn" type="button" title="Switch to dark theme" aria-label="Switch theme" aria-pressed="false">
+            <i data-lucide="moon"></i>
+          </button>
+          <a class="btn" href="/" title="Back to trade desk">
+            <i data-lucide="arrow-left"></i><span>Back</span>
+          </a>
+          <button id="refreshAssetsBtn" class="icon-btn" type="button" title="Refresh assets">
+            <i data-lucide="rotate-cw"></i>
+          </button>
+        </div>
+      </header>
+
+      <main class="export-layout">
+        <section class="panel export-panel">
+          <div class="panel-head">
+            <h2>Export Candles</h2>
+            <span id="assetLoadState" class="muted">Loading assets</span>
+          </div>
+          <form id="exportForm" class="export-form">
+            <label>
+              <span>Asset</span>
+              <select id="exportAssetInput" required>
+                <option value="">Loading...</option>
+              </select>
+            </label>
+            <label>
+              <span>Timeframe</span>
+              <select id="exportTimeframeInput">
+                <option value="60">1 minute</option>
+                <option value="300">5 minutes</option>
+              </select>
+            </label>
+            <label>
+              <span>Records</span>
+              <input id="exportRecordsInput" type="number" min="1" max="50000" step="1" value="1000" required />
+            </label>
+            <button id="exportSubmitBtn" class="btn primary" type="submit">
+              <span class="btn-spinner" aria-hidden="true"></span>
+              <i data-lucide="download"></i><span data-label>Export CSV</span>
+            </button>
+          </form>
+        </section>
+
+        <section class="panel export-status-panel">
+          <div class="panel-head">
+            <h2>Status</h2>
+            <span id="exportJobBadge" class="badge neutral">idle</span>
+          </div>
+          <div id="exportStatusBox" class="export-status-box">
+            <div>
+              <span class="label">Asset</span>
+              <strong id="exportStatusAsset">-</strong>
+            </div>
+            <div>
+              <span class="label">Timeframe</span>
+              <strong id="exportStatusTimeframe">-</strong>
+            </div>
+            <div>
+              <span class="label">Records</span>
+              <strong id="exportStatusRecords">-</strong>
+            </div>
+            <div>
+              <span class="label">Saved To</span>
+              <strong id="exportStatusPath" class="path-text">-</strong>
+            </div>
+          </div>
+          <div id="exportProgress" class="export-progress" hidden>
+            <span class="btn-spinner"></span>
+            <span>Exporting, waiting for broker candles...</span>
+          </div>
+          <div class="export-actions">
+            <a id="exportDownloadLink" class="btn success" href="#" hidden>
+              <i data-lucide="file-down"></i><span>Download CSV</span>
+            </a>
+          </div>
+        </section>
+
+        <section class="panel export-history-panel">
+          <div class="panel-head">
+            <h2>Export History</h2>
+            <button id="refreshHistoryBtn" class="icon-btn" type="button" title="Refresh history">
+              <i data-lucide="refresh-cw"></i>
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Updated</th>
+                  <th>Asset</th>
+                  <th>TF</th>
+                  <th>Rows</th>
+                  <th>Path</th>
+                  <th>File</th>
+                </tr>
+              </thead>
+              <tbody id="exportHistoryBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </div>
+  </body>
+</html>

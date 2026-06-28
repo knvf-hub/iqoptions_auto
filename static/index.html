@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IQ Auto Trader</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=20260621-port-icon" />
+  <script>
+    document.documentElement.dataset.theme = localStorage.getItem("iq-auto-theme") || "light";
+  </script>
+  <link rel="stylesheet" href="/static/styles.css?v=20260624-local-clock-v2" />
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+  <script src="/static/app.js?v=20260624-local-clock-v2" defer></script>
+</head>
+
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-area">
+        <div>
+          <h1>IQ Auto Trader</h1>
+          <div class="subline">
+            <span id="modeBadge" class="badge neutral">demo</span>
+            <span id="accountBadge" class="badge">PRACTICE</span>
+            <span id="connectionBadge" class="badge danger">offline</span>
+          </div>
+        </div>
+
+        <div id="localClock" class="local-clock">--:--:--</div>
+      </div>
+      <div class="actions">
+        <button id="themeToggleBtn" class="icon-btn" type="button" title="Switch to dark theme"
+          aria-label="Switch theme" aria-pressed="false">
+          <i data-lucide="moon"></i>
+        </button>
+        <a class="btn" href="/export" title="Export market candles">
+          <i data-lucide="download"></i><span>Export</span>
+        </a>
+        <button id="resetStatsBtn" class="btn" type="button" title="Reset dashboard stats">
+          <i data-lucide="history"></i><span>Reset Stats</span>
+        </button>
+        <button id="startBtn" class="btn primary" type="button" title="Start bot">
+          <span class="btn-spinner" aria-hidden="true"></span>
+          <i data-lucide="play"></i><span data-label>Start</span>
+        </button>
+        <button id="stopBtn" class="btn" type="button" title="Stop bot">
+          <span class="btn-spinner" aria-hidden="true"></span>
+          <i data-lucide="square"></i><span data-label>Stop</span>
+        </button>
+        <button id="tickBtn" class="icon-btn" type="button" title="Run one tick">
+          <i data-lucide="activity"></i>
+        </button>
+        <button id="reloadBtn" class="icon-btn" type="button" title="Reload config">
+          <i data-lucide="rotate-cw"></i>
+        </button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel control-panel">
+        <div class="panel-head">
+          <h2>Trade Desk</h2>
+          <span id="runningState" class="state-dot">stopped</span>
+        </div>
+        <div class="control-grid">
+          <div class="field asset-field">
+            <span>Asset</span>
+            <div id="assetCombo" class="asset-combo">
+              <button id="assetSelectButton" class="combo-button" type="button" aria-haspopup="listbox"
+                aria-expanded="false">
+                <span id="assetSelectedText">EURUSD-OTC</span>
+                <i data-lucide="chevron-down"></i>
+              </button>
+              <div id="assetMenu" class="combo-menu" hidden>
+                <div class="combo-search">
+                  <i data-lucide="search"></i>
+                  <input id="assetSearchInput" type="search" placeholder="Search" autocomplete="off" />
+                </div>
+                <div id="assetOptions" class="combo-options" role="listbox"></div>
+              </div>
+            </div>
+          </div>
+          <label>
+            <span>Type</span>
+            <select id="instrumentInput">
+              <option value="binary">Binary</option>
+              <option value="turbo">Turbo</option>
+            </select>
+          </label>
+          <label>
+            <span>Amount</span>
+            <input id="amountInput" type="number" min="0.1" step="0.1" value="1" />
+          </label>
+          <label>
+            <span>Minutes</span>
+            <select id="durationInput">
+              <option value="1">1 minute</option>
+              <option value="5">5 minutes</option>
+            </select>
+          </label>
+          <label>
+            <span>TP Today</span>
+            <input id="takeProfitInput" type="number" min="0" step="0.1" value="0" />
+          </label>
+          <label>
+            <span>Max Loss Today</span>
+            <input id="maxDailyLossInput" type="number" min="0.1" step="0.1" value="1000" />
+          </label>
+          <label class="switch-field full-field">
+            <span>Martingale x2</span>
+            <span class="switch-control">
+              <input id="martingaleInput" type="checkbox" />
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <strong id="martingaleInputText">Off</strong>
+            </span>
+          </label>
+          <label class="switch-field full-field">
+            <span>MTG 3-step</span>
+            <span class="switch-control">
+              <input id="martingale3StepInput" type="checkbox" />
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <strong id="martingale3StepInputText">Off</strong>
+            </span>
+          </label>
+        </div>
+        <div class="trade-actions">
+          <button id="callBtn" class="btn success" type="button">
+            <i data-lucide="trending-up"></i><span>Call</span>
+          </button>
+          <button id="putBtn" class="btn danger" type="button">
+            <i data-lucide="trending-down"></i><span>Put</span>
+          </button>
+        </div>
+        <div class="signal-box">
+          <div>
+            <span class="label">Signal</span>
+            <strong id="signalAction">Hold</strong>
+          </div>
+          <div>
+            <span class="label">Asset</span>
+            <strong id="signalAsset">-</strong>
+          </div>
+          <div>
+            <span class="label">Confidence</span>
+            <strong id="signalConfidence">0%</strong>
+          </div>
+          <div>
+            <span class="label">Reason</span>
+            <strong id="signalReason">waiting</strong>
+          </div>
+        </div>
+      </section>
+
+      <div class="center-stack">
+        <section class="metrics-grid">
+          <article class="metric">
+            <span>Balance</span>
+            <strong id="balanceValue">-</strong>
+          </article>
+          <article class="metric">
+            <span>P/L Today</span>
+            <strong id="todayProfitValue">0.00</strong>
+          </article>
+          <article class="metric">
+            <span>P/L Session</span>
+            <strong id="profitValue">0.00</strong>
+          </article>
+          <article class="metric">
+            <span>Win Rate</span>
+            <strong id="winRateValue">0%</strong>
+          </article>
+          <article class="metric">
+            <span>Open</span>
+            <strong id="openTradesValue">0</strong>
+          </article>
+          <article class="metric">
+            <span>Wins</span>
+            <strong id="winsValue" class="metric-win">0</strong>
+          </article>
+          <article class="metric">
+            <span>Losses</span>
+            <strong id="lossesValue" class="metric-loss">0</strong>
+          </article>
+          <article class="metric">
+            <span>Trades</span>
+            <strong id="tradeCountValue">0</strong>
+          </article>
+          <article class="metric">
+            <span>Loss Streak</span>
+            <strong id="lossStreakValue">0</strong>
+          </article>
+          <article class="metric">
+            <span>Next Amount</span>
+            <strong id="nextAmountValue">-</strong>
+          </article>
+        </section>
+
+        <section class="panel chart-panel">
+          <div class="panel-head">
+            <h2>Equity</h2>
+            <span id="lastTickValue" class="muted">-</span>
+          </div>
+          <canvas id="equityCanvas" height="170"></canvas>
+          <div id="equityTooltip" class="chart-tooltip" hidden></div>
+        </section>
+      </div>
+
+      <section class="panel history-panel">
+        <div class="panel-head">
+          <div class="history-title">
+            <h2>History</h2>
+            <span id="activeOrderBadge" class="active-order-badge" hidden>
+              <span class="pulse-dot"></span>
+              <span data-label>Active order</span>
+            </span>
+          </div>
+        </div>
+        <div class="history-table-panel">
+          <div class="history-table-head">
+            <span class="muted">Latest trades</span>
+            <div class="history-controls">
+              <select id="statusFilter" title="Trade status filter">
+                <option value="">All</option>
+                <option value="open">Open</option>
+                <option value="won">Won</option>
+                <option value="lost">Lost</option>
+                <option value="failed">Failed</option>
+              </select>
+              <select id="historyLimit" title="Rows">
+                <option value="50">50 rows</option>
+                <option value="100">100 rows</option>
+              </select>
+              <button id="clearHistoryBtn" class="icon-btn danger-outline" type="button" title="Clear history">
+                <i data-lucide="trash-2"></i>
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Asset</th>
+                  <th>Side</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>P/L</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody id="tradesBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="asset-summary">
+          <div class="asset-summary-head">
+            <h3>Pair Summary</h3>
+            <span id="assetSummaryMode" class="muted">Session by asset and side</span>
+          </div>
+          <div class="table-wrap compact-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Side</th>
+                  <th>Trades</th>
+                  <th>W/L</th>
+                  <th>Win Rate</th>
+                  <th>P/L</th>
+                  <th>Avg Conf.</th>
+                  <th>Enabled</th>
+                </tr>
+              </thead>
+              <tbody id="assetStatsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel telegram-panel">
+        <div class="panel-head">
+          <h2>Telegram</h2>
+          <div class="telegram-head-actions">
+            <a class="mini-link" href="https://web.telegram.org/" target="_blank" rel="noreferrer"
+              title="Open Telegram Web">
+              <i data-lucide="external-link"></i><span>Web</span>
+            </a>
+            <span id="telegramState" class="state-dot stopped">off</span>
+          </div>
+        </div>
+        <div class="telegram-toggles">
+          <label class="switch-field compact-switch">
+            <span>Listen</span>
+            <span class="switch-control">
+              <input id="telegramEnabledInput" type="checkbox" />
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <strong id="telegramEnabledText">Off</strong>
+            </span>
+          </label>
+          <label class="switch-field compact-switch">
+            <span>Follow</span>
+            <span class="switch-control">
+              <input id="telegramFollowInput" type="checkbox" />
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <strong id="telegramFollowText">Off</strong>
+            </span>
+          </label>
+        </div>
+        <div class="telegram-signal-box">
+          <div>
+            <span class="label">Channel</span>
+            <strong id="telegramChannel">-</strong>
+          </div>
+          <div>
+            <span class="label">Signal</span>
+            <strong id="telegramSignal">-</strong>
+          </div>
+          <div>
+            <span class="label">Entry</span>
+            <strong id="telegramEntry">-</strong>
+          </div>
+          <div>
+            <span class="label">History</span>
+            <strong id="telegramHistory">-</strong>
+          </div>
+          <div>
+            <span class="label">MTG</span>
+            <strong id="telegramMtg">Fixed 1x / 2x / 4x</strong>
+          </div>
+          <div>
+            <span class="label">Status</span>
+            <strong id="telegramError">-</strong>
+          </div>
+        </div>
+        <div class="telegram-feed-head">
+          <span class="muted">Latest signals</span>
+        </div>
+        <div id="telegramFeed" class="telegram-feed">
+          <div class="telegram-empty">No Telegram signals yet</div>
+        </div>
+      </section>
+
+      <section class="panel events-panel" hidden>
+        <div class="panel-head">
+          <h2>Events</h2>
+          <span id="brokerMessage" class="muted">-</span>
+        </div>
+        <div id="eventsScroller" class="event-scroller">
+          <ol id="eventsList" class="event-list"></ol>
+          <div id="eventsLoader" class="events-loader">Loading</div>
+        </div>
+      </section>
+    </main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </div>
+</body>
+
+</html>

@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+config.yaml
+data/*.db
+data/*.db-*
+data/server.*
+logs/*.log
+
+# local/session files
+data/*.session
+*.session
+.DS_Store
+
+# exported market data
+data/market_exports/
+EOF
+# local/session files
+data/*.session
+*.session
+.DS_Store
+
+# exported market data
+data/market_exports/

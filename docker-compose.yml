@@ -1,0 +1,17 @@
+services:
+  iq-auto-trader:
+    build:
+      context: .
+    image: iqoptions-auto:latest
+    container_name: iqoptions-auto
+    ports:
+      - "8887:8887"
+    environment:
+      IQ_AUTO_CONFIG: /app/config.yaml
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - /Users/frankz/Documents/_self/EA_IQ_BOT/logs:/app/data/telegram_source_logs:ro
+      - /Users/frankz/Documents/_self/EA_IQ_BOT/telegram_session.session:/app/telegram_session.session
+    restart: unless-stopped
