@@ -296,7 +296,8 @@ class TelegramSignalManager:
     async def _prime_poll_loop(self, client: Any) -> None:
         while self._running and self.config.telegram.enabled:
             if self.config.telegram.follow_signals and self.config.telegram.follow_latest_pending:
-                await self._safe_prime_latest_pending_signal(client, quiet=True)
+                if self.engine.status(include_broker=False).get("running"):
+                    await self._safe_prime_latest_pending_signal(client, quiet=True)
             await asyncio.sleep(15)
 
     def cancel_pending_orders(self) -> None:
@@ -473,6 +474,24 @@ class TelegramSignalManager:
         source_id = f"prime:{getattr(message, 'id', '')}:{parsed.signal_time}:{parsed.active_raw}:{parsed.direction}"
         if source_id in self._handled_prime_source_ids:
             return
+        if not self.engine.status(include_broker=False).get("running"):
+            self._latest_signal = {
+                "received_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "channel": channel_filter,
+                "active_raw": parsed.active_raw,
+                "symbol": map_active_to_symbol(parsed.active_raw),
+                "direction": parsed.direction,
+                "expiration": parsed.expiration,
+                "signal_time": parsed.signal_time,
+                "entry_time": self._entry_time_text(parsed.signal_time),
+                "raw_text": parsed.raw_text,
+                "mapped": False,
+                "order_status": "skipped",
+                "order_message": "bot_is_stopped",
+                "source": "prime",
+                "source_id": source_id,
+            }
+            return
         resolved = await self._resolve_live_symbol(parsed.active_raw)
         symbol = resolved["symbol"]
         mapped = bool(resolved["mapped"])
@@ -558,6 +577,26 @@ class TelegramSignalManager:
         source_id: Optional[str] = None,
         received_at: Optional[str] = None,
     ) -> None:
+        if self.config.telegram.follow_signals and not self.engine.status(include_broker=False).get("running"):
+            signal = {
+                "received_at": received_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "channel": channel,
+                "active_raw": parsed.active_raw,
+                "symbol": map_active_to_symbol(parsed.active_raw),
+                "direction": parsed.direction,
+                "expiration": parsed.expiration,
+                "signal_time": parsed.signal_time,
+                "entry_time": self._entry_time_text(parsed.signal_time),
+                "raw_text": parsed.raw_text,
+                "mapped": False,
+                "order_status": "skipped",
+                "order_message": "bot_is_stopped",
+                "source": source,
+                "source_id": source_id or f"{source}:{channel}:{parsed.signal_time}:{parsed.active_raw}:{parsed.direction}",
+            }
+            self._latest_signal = signal
+            self.db.add_event("info", "telegram", "Telegram signal skipped because bot is stopped", signal)
+            return
         resolved = await self._resolve_live_symbol(parsed.active_raw)
         symbol = resolved["symbol"]
         mapped = bool(resolved["mapped"])
