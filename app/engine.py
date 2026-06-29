@@ -16,6 +16,7 @@ from app.selector import CandidateSignal, scan_and_select
 
 STRATEGY_MARTINGALE_STATE_KEY = "strategy_martingale_pending"
 STRATEGY_MARTINGALE_MULTIPLIERS = (1.0, 1.5, 4.0)
+STALE_SETTLEMENT_GRACE_SEC = 180
 
 
 class TradingEngine:
@@ -889,12 +890,19 @@ class TradingEngine:
                     timeout=20,
                 )
             except asyncio.TimeoutError:
-                self.db.add_event(
-                    "warning",
-                    "trade",
-                    "Trade settlement timed out",
-                    {"id": trade["id"], "order_id": trade["order_id"]},
-                )
+                payload = {"id": trade["id"], "order_id": trade["order_id"]}
+                if self._trade_settlement_is_stale(trade):
+                    raw = {
+                        "broker": self.config.broker.mode,
+                        "status": "timeout",
+                        "message": "order result lookup timed out after settlement grace period",
+                        "grace_sec": STALE_SETTLEMENT_GRACE_SEC,
+                        "order_id": trade["order_id"],
+                    }
+                    self.db.fail_trade(int(trade["id"]), raw["message"], raw)
+                    self.db.add_event("warning", "trade", "Trade marked failed after stale settlement timeout", {**payload, "raw": raw})
+                else:
+                    self.db.add_event("warning", "trade", "Trade settlement timed out", payload)
                 continue
             except Exception as exc:
                 self.db.add_event(
@@ -908,6 +916,14 @@ class TradingEngine:
                 if raw.get("status") == "unknown":
                     self.db.fail_trade(int(trade["id"]), raw.get("message", "order not found"), raw)
                     self.db.add_event("warning", "trade", "Trade marked failed", {"id": trade["id"], "raw": raw})
+                elif self._trade_settlement_is_stale(trade):
+                    payload = {
+                        **raw,
+                        "message": "order result unavailable after settlement grace period",
+                        "grace_sec": STALE_SETTLEMENT_GRACE_SEC,
+                    }
+                    self.db.fail_trade(int(trade["id"]), payload["message"], payload)
+                    self.db.add_event("warning", "trade", "Trade marked failed after stale settlement", {"id": trade["id"], "raw": payload})
                 continue
             exit_price = None
             payout = None
@@ -930,6 +946,15 @@ class TradingEngine:
             await self._refresh_balance_after_settlement(trade, round(float(profit), 2))
             self._update_strategy_martingale_after_close(trade, round(float(profit), 2))
             await self._maybe_place_telegram_martingale(trade, round(float(profit), 2))
+
+    def _trade_settlement_is_stale(self, trade: dict[str, Any]) -> bool:
+        try:
+            expires_at = datetime.fromisoformat(str(trade.get("expires_at") or ""))
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return False
+        return (datetime.now(timezone.utc) - expires_at).total_seconds() >= STALE_SETTLEMENT_GRACE_SEC
 
     async def _place_strategy_martingale_trade(self, pending: dict[str, Any]) -> dict[str, Any]:
         asset = str(pending.get("asset") or "")

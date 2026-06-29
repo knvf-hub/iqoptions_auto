@@ -326,16 +326,20 @@ class Database:
             counts = {
                 "trades": int(db.execute("SELECT COUNT(*) AS count FROM trades").fetchone()["count"] or 0),
                 "signals": int(db.execute("SELECT COUNT(*) AS count FROM signals").fetchone()["count"] or 0),
+                "telegram_signals": int(
+                    db.execute("SELECT COUNT(*) AS count FROM telegram_signals").fetchone()["count"] or 0
+                ),
                 "events": int(db.execute("SELECT COUNT(*) AS count FROM events").fetchone()["count"] or 0)
                 if include_events
                 else 0,
             }
             db.execute("DELETE FROM trades")
             db.execute("DELETE FROM signals")
+            db.execute("DELETE FROM telegram_signals")
             if include_events:
                 db.execute("DELETE FROM events")
 
-            tables = ["trades", "signals"]
+            tables = ["trades", "signals", "telegram_signals"]
             if include_events:
                 tables.append("events")
             placeholders = ", ".join("?" for _ in tables)

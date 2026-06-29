@@ -18,8 +18,8 @@ from app.engine import TradingEngine
 CUSTOM_MAP = {
     "ARBITRUM": "ARBUSD-OTC",
     "ARB": "ARBUSD-OTC",
-    "BITCOIN": "BTCUSD-op",
-    "BITCOINUSD": "BTCUSD-op",
+    "BITCOIN": "BTCUSD-OTC",
+    "BITCOINUSD": "BTCUSD-OTC",
     "BITCOINUSD-OTC": "BTCUSD-OTC",
     "BITCOINCASH": "BCHUSD-OTC",
     "BITCOINCASH-OTC": "BCHUSD-OTC",
@@ -175,6 +175,8 @@ class TelegramSignalManager:
         self._client: Any = None
         self._prime_on_connect = False
         self._scheduled_signal_keys: set[str] = set()
+        self._prime_poll_task: Optional[asyncio.Task] = None
+        self._handled_prime_source_ids: set[str] = set()
 
     async def startup(self) -> None:
         self.import_history()
@@ -224,6 +226,11 @@ class TelegramSignalManager:
             await self.engine.activate_telegram_follow_mode()
             if self.config.telegram.follow_latest_pending:
                 self.schedule_prime_latest_pending_signal()
+        if self.config.telegram.enabled and self.config.telegram.follow_signals and self.config.telegram.follow_latest_pending:
+            if self._client is not None:
+                self._start_prime_poll(self._client)
+        else:
+            await self._stop_prime_poll()
         self.db.add_event(
             "info",
             "telegram",
@@ -246,6 +253,7 @@ class TelegramSignalManager:
 
     async def stop(self) -> None:
         self._running = False
+        await self._stop_prime_poll()
         task = self._task
         self._task = None
         if task and not task.done():
@@ -270,11 +278,33 @@ class TelegramSignalManager:
         self._signal_tasks.add(task)
         task.add_done_callback(self._signal_tasks.discard)
 
+    def _start_prime_poll(self, client: Any) -> None:
+        if self._prime_poll_task and not self._prime_poll_task.done():
+            return
+        self._prime_poll_task = asyncio.create_task(self._prime_poll_loop(client))
+
+    async def _stop_prime_poll(self) -> None:
+        task = self._prime_poll_task
+        self._prime_poll_task = None
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    async def _prime_poll_loop(self, client: Any) -> None:
+        while self._running and self.config.telegram.enabled:
+            if self.config.telegram.follow_signals and self.config.telegram.follow_latest_pending:
+                await self._safe_prime_latest_pending_signal(client, quiet=True)
+            await asyncio.sleep(15)
+
     def cancel_pending_orders(self) -> None:
         for signal_task in list(self._signal_tasks):
             signal_task.cancel()
         self._signal_tasks.clear()
         self._scheduled_signal_keys.clear()
+        self._handled_prime_source_ids.clear()
 
     def import_history(self) -> dict[str, int]:
         allowed = self._iq_symbols_from_runtime()
@@ -391,6 +421,7 @@ class TelegramSignalManager:
             self.db.add_event("info", "telegram", "Telegram listener started", {"channel": channel_filter})
             if self.config.telegram.follow_signals and self.config.telegram.follow_latest_pending:
                 self.schedule_prime_latest_pending_signal()
+                self._start_prime_poll(client)
             await client.run_until_disconnected()
         except asyncio.CancelledError:
             raise
@@ -398,12 +429,13 @@ class TelegramSignalManager:
             self._last_error = str(exc)
             self.db.add_event("error", "telegram", "Telegram listener failed", {"error": str(exc)})
         finally:
+            await self._stop_prime_poll()
             self._client = None
             self._running = False
 
-    async def _safe_prime_latest_pending_signal(self, client: Any) -> None:
+    async def _safe_prime_latest_pending_signal(self, client: Any, *, quiet: bool = False) -> None:
         try:
-            await asyncio.wait_for(self._prime_latest_pending_signal(client), timeout=8)
+            await asyncio.wait_for(self._prime_latest_pending_signal(client, quiet=quiet), timeout=8)
         except asyncio.TimeoutError:
             self._last_error = "telegram_latest_signal_prime_timeout"
             self.db.add_event("warning", "telegram", "Telegram latest signal prime timed out", {})
@@ -413,7 +445,7 @@ class TelegramSignalManager:
             self._last_error = str(exc)
             self.db.add_event("warning", "telegram", "Telegram latest signal prime failed", {"error": str(exc)})
 
-    async def _prime_latest_pending_signal(self, client: Any) -> None:
+    async def _prime_latest_pending_signal(self, client: Any, *, quiet: bool = False) -> None:
         self._prime_on_connect = False
         channel_filter = str(self.config.telegram.channel or "")
         try:
@@ -433,41 +465,70 @@ class TelegramSignalManager:
                 latest_parsed = (parsed, message)
                 break
         if latest_parsed is None:
-            self.db.add_event("info", "telegram", "Telegram latest signal prime skipped", {"reason": "no_signal_in_recent_messages"})
+            if not quiet:
+                self.db.add_event("info", "telegram", "Telegram latest signal prime skipped", {"reason": "no_signal_in_recent_messages"})
             return
 
         parsed, message = latest_parsed
+        source_id = f"prime:{getattr(message, 'id', '')}:{parsed.signal_time}:{parsed.active_raw}:{parsed.direction}"
+        if source_id in self._handled_prime_source_ids:
+            return
+        resolved = await self._resolve_live_symbol(parsed.active_raw)
+        symbol = resolved["symbol"]
+        mapped = bool(resolved["mapped"])
         seconds_until_entry = self._seconds_until_entry(parsed.signal_time)
         if seconds_until_entry < 0:
             self._latest_signal = {
                 "received_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "channel": channel_filter,
                 "active_raw": parsed.active_raw,
-                "symbol": map_active_to_symbol(parsed.active_raw),
+                "symbol": symbol,
                 "direction": parsed.direction,
                 "expiration": parsed.expiration,
                 "signal_time": parsed.signal_time,
                 "entry_time": self._entry_time_text(parsed.signal_time),
                 "raw_text": parsed.raw_text,
-                "mapped": False,
+                "mapped": mapped,
+                "mapped_reason": resolved["reason"],
+                "candidates": resolved["candidates"],
                 "order_status": "skipped",
                 "order_message": "latest_signal_entry_time_passed",
+                "source": "prime",
+                "source_id": source_id,
             }
+            self.db.upsert_telegram_signal(
+                source_id=source_id,
+                received_at=self._latest_signal["received_at"],
+                provider=channel_filter,
+                active_raw=parsed.active_raw,
+                symbol=symbol,
+                direction=parsed.direction,
+                expiration=parsed.expiration,
+                signal_time=parsed.signal_time,
+                entry_time=self._latest_signal["entry_time"],
+                raw_text=parsed.raw_text,
+                mapped=mapped,
+                source="prime",
+                status="skipped",
+                payload=self._latest_signal,
+            )
+            self._handled_prime_source_ids.add(source_id)
+            if not quiet:
+                self.db.add_event(
+                    "info",
+                    "telegram",
+                    "Telegram latest signal ignored because entry time passed",
+                    self._latest_signal,
+                )
+            return
+
+        if not quiet:
             self.db.add_event(
                 "info",
                 "telegram",
-                "Telegram latest signal ignored because entry time passed",
-                self._latest_signal,
+                "Telegram latest pending signal found",
+                {"active": parsed.active_raw, "direction": parsed.direction, "signal_time": parsed.signal_time},
             )
-            return
-
-        source_id = f"prime:{getattr(message, 'id', '')}:{parsed.signal_time}:{parsed.active_raw}:{parsed.direction}"
-        self.db.add_event(
-            "info",
-            "telegram",
-            "Telegram latest pending signal found",
-            {"active": parsed.active_raw, "direction": parsed.direction, "signal_time": parsed.signal_time},
-        )
         await self._handle_live_signal(
             parsed,
             channel_filter,
@@ -502,6 +563,8 @@ class TelegramSignalManager:
         mapped = bool(resolved["mapped"])
         received_at = received_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         source_id = source_id or f"live:{channel}:{parsed.signal_time}:{parsed.active_raw}:{parsed.direction}"
+        if source == "prime" and source_id in self._handled_prime_source_ids:
+            return
         signal = {
             "received_at": received_at,
             "channel": channel,
@@ -538,6 +601,8 @@ class TelegramSignalManager:
             payload=signal,
         )
         self.db.add_event("info", "telegram", "Telegram signal received", signal)
+        if source == "prime":
+            self._handled_prime_source_ids.add(source_id)
         if not mapped:
             self.db.add_event(
                 "warning",
