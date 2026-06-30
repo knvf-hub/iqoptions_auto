@@ -1433,7 +1433,8 @@ class TradingEngine:
         ignore_cooldown: bool = False,
     ) -> tuple[bool, str]:
         trade_amount = amount if amount is not None else self.config.trading.amount
-        stats = self.db.daily_stats()
+        session_stats = self.db.daily_stats(since=self.stats_since_at())
+        today_stats = self.db.daily_stats()
 
         if signal.action not in {"call", "put"}:
             return False, signal.reason
@@ -1443,18 +1444,18 @@ class TradingEngine:
             return False, "real_balance_disabled_by_risk_guard"
         if self.config.risk.max_trade_amount > 0 and trade_amount > self.config.risk.max_trade_amount:
             return False, "amount_exceeds_max_trade_amount"
-        if self.config.risk.take_profit > 0 and stats["profit"] >= self.config.risk.take_profit:
+        if self.config.risk.take_profit > 0 and session_stats["profit"] >= self.config.risk.take_profit:
             return False, "take_profit_reached"
-        if stats["daily_loss"] >= self.config.risk.max_daily_loss:
+        if today_stats["daily_loss"] >= self.config.risk.max_daily_loss:
             return False, "daily_loss_limit_reached"
-        projected_loss = abs(min(float(stats["profit"] or 0) - float(trade_amount), 0.0))
+        projected_loss = abs(min(float(today_stats["profit"] or 0) - float(trade_amount), 0.0))
         if projected_loss > self.config.risk.max_daily_loss:
             return False, "daily_loss_limit_would_be_exceeded"
-        if self.config.risk.max_trades_per_day > 0 and stats["trades"] >= self.config.risk.max_trades_per_day:
+        if self.config.risk.max_trades_per_day > 0 and today_stats["trades"] >= self.config.risk.max_trades_per_day:
             return False, "max_trades_per_day_reached"
         if (
             self.config.risk.stop_after_consecutive_losses > 0
-            and stats["consecutive_losses"] >= self.config.risk.stop_after_consecutive_losses
+            and today_stats["consecutive_losses"] >= self.config.risk.stop_after_consecutive_losses
         ):
             return False, "consecutive_loss_limit_reached"
         if self.config.trading.one_open_trade_at_a_time and self.db.count_open_trades() > 0:

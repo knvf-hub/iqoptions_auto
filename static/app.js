@@ -171,7 +171,7 @@ const REASON_TH = {
   asset_direction_disabled: "ฝั่ง CALL/PUT นี้ถูกปิดไว้",
   daily_loss_limit_reached: "ถึงขีดจำกัดขาดทุนวันนี้",
   daily_loss_would_be_exceeded: "ไม้ถัดไปเสี่ยงเกิน Max Loss",
-  take_profit_reached: "ถึงเป้ากำไรวันนี้แล้ว",
+  take_profit_reached: "ถึงเป้ากำไรรอบนี้แล้ว",
   max_trades_reached: "ถึงจำนวนออเดอร์สูงสุดวันนี้",
   order_sent: "ส่งคำสั่งแล้ว",
   order_not_placed: "ยังเข้าออเดอร์ไม่ได้",
