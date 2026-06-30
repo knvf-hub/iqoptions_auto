@@ -5,7 +5,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
@@ -95,6 +95,13 @@ class ParsedTelegramSignal:
     raw_text: str
 
 
+@dataclass
+class ParsedPaperResult:
+    active_raw: str
+    status: str
+    raw_text: str
+
+
 def parse_signal(text: str) -> Optional[ParsedTelegramSignal]:
     active = re.search(r"Active:\s*(.+)", text, re.IGNORECASE)
     expiration = re.search(r"Expiration:\s*(M\d+)", text, re.IGNORECASE)
@@ -109,6 +116,41 @@ def parse_signal(text: str) -> Optional[ParsedTelegramSignal]:
         direction="call" if raw_direction in {"COMPRA", "CALL"} else "put",
         signal_time=trade_time.group(1).strip(),
         raw_text=text,
+    )
+
+
+def parse_usa_paper_signal(text: str) -> Optional[ParsedTelegramSignal]:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return None
+    result = parse_usa_paper_result(normalized)
+    if result:
+        return None
+    asset = re.search(r"(?:💸|\$)\s*([A-Z]{6,12}(?:/[A-Z]{3,6})?)", normalized, re.IGNORECASE)
+    expiration = re.search(r"(?:✨|Expiration:?|Exp:?|^|\s)(M\d+)\b", normalized, re.IGNORECASE | re.MULTILINE)
+    trade_time = re.search(r"(?:⌚|Time:?|Entrada:?|Entry:?)\s*(\d{2}:\d{2})", normalized, re.IGNORECASE)
+    direction = re.search(r"(BUY|SELL|CALL|PUT|COMPRA|VENDA|⬆️|⬇️)", normalized, re.IGNORECASE)
+    if not asset or not trade_time or not direction:
+        return None
+    raw_direction = direction.group(1).upper()
+    return ParsedTelegramSignal(
+        active_raw=asset.group(1).strip(),
+        expiration=expiration.group(1).upper() if expiration else "M1",
+        direction="call" if raw_direction in {"BUY", "CALL", "COMPRA", "⬆️"} else "put",
+        signal_time=trade_time.group(1).strip(),
+        raw_text=normalized,
+    )
+
+
+def parse_usa_paper_result(text: str) -> Optional[ParsedPaperResult]:
+    match = re.search(r"\b([A-Z]{6,12})\s+(Win|Loss|Draw)!?\b", str(text or ""), re.IGNORECASE)
+    if not match:
+        return None
+    result = match.group(2).lower()
+    return ParsedPaperResult(
+        active_raw=match.group(1).strip(),
+        status={"win": "won", "loss": "lost", "draw": "draw"}[result],
+        raw_text=str(text or "").strip(),
     )
 
 
@@ -177,10 +219,15 @@ class TelegramSignalManager:
         self._scheduled_signal_keys: set[str] = set()
         self._prime_poll_task: Optional[asyncio.Task] = None
         self._handled_prime_source_ids: set[str] = set()
+        self._paper_imported = 0
+        self._paper_mapped = 0
+        self._latest_paper_signal: dict[str, Any] = {}
 
     async def startup(self) -> None:
         self.import_history()
-        if self.config.telegram.enabled:
+        if self.config.telegram.paper_enabled:
+            await self.import_paper_history()
+        if self._should_listen():
             await self.start()
 
     async def shutdown(self) -> None:
@@ -198,6 +245,7 @@ class TelegramSignalManager:
             "imported": self._imported,
             "mapped": self._mapped,
             "min_history_signals": self.config.telegram.min_history_signals,
+            "paper": self.paper_status(),
         }
         if include_summary:
             data["summary"] = self.db.telegram_asset_stats(min_signals=self.config.telegram.min_history_signals)
@@ -218,7 +266,7 @@ class TelegramSignalManager:
         self.engine.config.telegram.enabled = self.config.telegram.enabled
         self.engine.config.telegram.follow_signals = self.config.telegram.follow_signals
         self.engine.config.telegram.follow_latest_pending = self.config.telegram.follow_latest_pending
-        if self.config.telegram.enabled:
+        if self._should_listen():
             await self.start()
         else:
             await self.stop()
@@ -242,6 +290,21 @@ class TelegramSignalManager:
             },
         )
         return self.status()
+
+    def _should_listen(self) -> bool:
+        return bool(self.config.telegram.enabled or self.config.telegram.paper_enabled)
+
+    def paper_status(self) -> dict[str, Any]:
+        return {
+            "enabled": self.config.telegram.paper_enabled,
+            "channel_keyword": self.config.telegram.paper_channel_keyword,
+            "history_hours": self.config.telegram.paper_history_hours,
+            "running": self._running and self.config.telegram.paper_enabled,
+            "imported": self._paper_imported,
+            "mapped": self._paper_mapped,
+            "latest_signal": self._latest_paper_signal,
+            "stats": self.db.telegram_paper_stats(hours=self.config.telegram.paper_history_hours),
+        }
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -356,6 +419,176 @@ class TelegramSignalManager:
         self.db.add_event("info", "telegram", "Telegram history imported", {"imported": imported, "mapped": mapped})
         return {"imported": imported, "mapped": mapped}
 
+    async def import_paper_history(self) -> dict[str, int]:
+        try:
+            from telethon import TelegramClient
+        except Exception as exc:
+            self.db.add_event("warning", "telegram_paper", "Telegram paper import skipped", {"error": str(exc)})
+            return {"imported": 0, "mapped": 0}
+
+        client: Any = self._client
+        owns_client = client is None
+        try:
+            if owns_client:
+                api_id = int(self.config.telegram.api_id)
+                api_hash = str(self.config.telegram.api_hash)
+                session = str(self._resolve_path(self.config.telegram.session_path))
+                client = TelegramClient(session, api_id, api_hash)
+                await client.connect()
+                if not await client.is_user_authorized():
+                    await client.disconnect()
+                    return {"imported": 0, "mapped": 0}
+
+            keyword = str(self.config.telegram.paper_channel_keyword or "")
+            self.db.clear_telegram_paper_since(hours=self.config.telegram.paper_history_hours)
+            imported = 0
+            mapped = 0
+            async for dialog in client.iter_dialogs(limit=300):
+                title = str(getattr(dialog, "name", "") or "")
+                if keyword and keyword.lower() not in title.lower():
+                    continue
+                messages = list(await client.get_messages(dialog.entity, limit=self.config.telegram.paper_import_limit))
+                messages.sort(key=lambda item: getattr(item, "date", None) or datetime.min.replace(tzinfo=timezone.utc))
+                for message in messages:
+                    message_date = getattr(message, "date", None)
+                    if message_date:
+                        message_date = message_date.astimezone(timezone.utc)
+                    if message_date and datetime.now(timezone.utc) - message_date > timedelta(hours=self.config.telegram.paper_history_hours):
+                        continue
+                    received_at = message_date.isoformat(timespec="seconds") if message_date else None
+                    result = self._handle_paper_result_message(
+                        str(getattr(message, "raw_text", "") or ""),
+                        title,
+                        str(getattr(message, "id", "")),
+                        received_at=received_at,
+                    )
+                    if result:
+                        continue
+                    saved = self._handle_paper_signal_message(
+                        str(getattr(message, "raw_text", "") or ""),
+                        title,
+                        str(getattr(message, "id", "")),
+                        received_at=received_at,
+                    )
+                    if saved:
+                        imported += 1
+                        if saved.get("mapped"):
+                            mapped += 1
+            if owns_client:
+                await client.disconnect()
+        except Exception as exc:
+            if owns_client and client is not None:
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+            self.db.add_event("warning", "telegram_paper", "Telegram paper history import failed", {"error": str(exc)})
+            return {"imported": self._paper_imported, "mapped": self._paper_mapped}
+
+        self._paper_imported = imported
+        self._paper_mapped = mapped
+        self.db.add_event("info", "telegram_paper", "Telegram paper history imported", {"imported": imported, "mapped": mapped})
+        return {"imported": imported, "mapped": mapped}
+
+    def _handle_paper_signal_message(
+        self,
+        text: str,
+        channel: str,
+        message_id: str,
+        *,
+        received_at: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        parsed = parse_usa_paper_signal(text)
+        if not parsed:
+            return None
+        allowed = self._iq_symbols_from_runtime()
+        candidates = candidate_symbols_for_active(parsed.active_raw)
+        symbol = self._choose_allowed_symbol(candidates, allowed) or (candidates[0] if candidates else normalize_active(parsed.active_raw))
+        mapped = symbol in allowed
+        filtered, filter_reason = self._paper_filter_reason(parsed, symbol=symbol, mapped=mapped)
+        status = "filtered" if filtered else "pending"
+        received_at = received_at or utc_now()
+        source_id = f"paper:{channel}:{message_id}:{parsed.signal_time}:{parsed.active_raw}:{parsed.direction}"
+        payload = {
+            "received_at": received_at,
+            "channel": channel,
+            "message_id": message_id,
+            "active_raw": parsed.active_raw,
+            "symbol": symbol,
+            "direction": parsed.direction,
+            "expiration": parsed.expiration,
+            "signal_time": parsed.signal_time,
+            "entry_time": self._entry_time_text(parsed.signal_time),
+            "raw_text": parsed.raw_text,
+            "mapped": mapped,
+            "filtered": filtered,
+            "filter_reason": filter_reason,
+            "status": status,
+            "source": "paper",
+            "source_id": source_id,
+        }
+        self.db.upsert_telegram_paper_signal(
+            source_id=source_id,
+            received_at=received_at,
+            provider=channel,
+            message_id=message_id,
+            active_raw=parsed.active_raw,
+            symbol=symbol,
+            direction=parsed.direction,
+            expiration=parsed.expiration,
+            signal_time=parsed.signal_time,
+            entry_time=payload["entry_time"],
+            raw_text=parsed.raw_text,
+            mapped=mapped,
+            filtered=filtered,
+            filter_reason=filter_reason,
+            status=status,
+            payload=payload,
+        )
+        self._latest_paper_signal = payload
+        return payload
+
+    def _handle_paper_result_message(
+        self,
+        text: str,
+        channel: str,
+        message_id: str,
+        *,
+        received_at: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        parsed = parse_usa_paper_result(text)
+        if not parsed:
+            return None
+        allowed = self._iq_symbols_from_runtime()
+        candidates = candidate_symbols_for_active(parsed.active_raw)
+        symbol = self._choose_allowed_symbol(candidates, allowed) or (candidates[0] if candidates else normalize_active(parsed.active_raw))
+        closed = self.db.close_next_telegram_paper_signal(
+            symbol=symbol,
+            status=parsed.status,
+            result_at=received_at or utc_now(),
+            result_message_id=message_id,
+            result_text=parsed.raw_text,
+        )
+        if closed:
+            self._latest_paper_signal = closed
+            return closed
+        self.db.add_event(
+            "info",
+            "telegram_paper",
+            "Telegram paper result had no pending signal",
+            {"channel": channel, "message_id": message_id, "symbol": symbol, "status": parsed.status},
+        )
+        return {"symbol": symbol, "status": parsed.status, "matched": False}
+
+    def _paper_filter_reason(self, parsed: ParsedTelegramSignal, *, symbol: str, mapped: bool) -> tuple[bool, str]:
+        if not mapped:
+            return True, "asset_not_configured_or_seen"
+        if parsed.expiration.upper() != "M1":
+            return True, "only_m1_supported"
+        if parsed.direction not in {"call", "put"}:
+            return True, "direction_not_supported"
+        return False, "paper_ok"
+
     def _history_files(self) -> list[Path]:
         base = self._resolve_path(self.config.telegram.source_logs_path)
         if not base.exists():
@@ -397,6 +630,7 @@ class TelegramSignalManager:
             api_hash = str(self.config.telegram.api_hash)
             session = str(self._resolve_path(self.config.telegram.session_path))
             channel_filter = str(self.config.telegram.channel or "")
+            paper_keyword = str(self.config.telegram.paper_channel_keyword or "")
             client = TelegramClient(session, api_id, api_hash)
             await client.connect()
             self._client = client
@@ -411,15 +645,28 @@ class TelegramSignalManager:
             async def on_message(event: Any) -> None:
                 chat = await event.get_chat()
                 title = str(getattr(chat, "title", "") or "")
+                raw_text = str(event.raw_text or "")
+                message_id = str(getattr(getattr(event, "message", None), "id", "") or "")
+                message_date = getattr(getattr(event, "message", None), "date", None)
+                received_at = (
+                    message_date.astimezone(timezone.utc).isoformat(timespec="seconds")
+                    if message_date
+                    else utc_now()
+                )
+                if self.config.telegram.paper_enabled and paper_keyword and paper_keyword.lower() in title.lower():
+                    if self._handle_paper_result_message(raw_text, title, message_id, received_at=received_at):
+                        return
+                    if self._handle_paper_signal_message(raw_text, title, message_id, received_at=received_at):
+                        return
                 if channel_filter and channel_filter.lower() not in title.lower():
                     return
-                parsed = parse_signal(str(event.raw_text or ""))
+                parsed = parse_signal(raw_text)
                 if not parsed:
                     return
                 await self._handle_live_signal(parsed, title)
 
             self._last_error = None
-            self.db.add_event("info", "telegram", "Telegram listener started", {"channel": channel_filter})
+            self.db.add_event("info", "telegram", "Telegram listener started", {"channel": channel_filter, "paper_keyword": paper_keyword})
             if self.config.telegram.follow_signals and self.config.telegram.follow_latest_pending:
                 self.schedule_prime_latest_pending_signal()
                 self._start_prime_poll(client)

@@ -370,6 +370,52 @@ h2 {
   min-width: 880px;
 }
 
+.paper-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.9fr) minmax(520px, 1.1fr);
+  gap: 12px;
+}
+
+.paper-signals-panel {
+  grid-column: 1 / -1;
+}
+
+.paper-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-card {
+  min-height: 78px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.metric-card span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.metric-card strong {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.paper-table-wrap {
+  max-height: 520px;
+  overflow: auto;
+}
+
+.paper-table-wrap table {
+  min-width: 760px;
+}
+
 .mini-download {
   color: var(--green);
   font-weight: 760;
@@ -1534,7 +1580,8 @@ td.reason-cell {
 }
 
 @media (max-width: 1120px) {
-  .export-layout {
+  .export-layout,
+  .paper-layout {
     grid-template-columns: 1fr;
   }
 
@@ -1587,8 +1634,13 @@ td.reason-cell {
     justify-content: flex-start;
   }
 
-  .export-layout {
+  .export-layout,
+  .paper-layout {
     max-width: calc(100vw - 24px);
+  }
+
+  .paper-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .panel-head {

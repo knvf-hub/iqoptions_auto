@@ -120,6 +120,33 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_telegram_signals_symbol ON telegram_signals(symbol, direction);
                 CREATE INDEX IF NOT EXISTS idx_telegram_signals_received ON telegram_signals(received_at DESC);
 
+                CREATE TABLE IF NOT EXISTS telegram_paper_signals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_id TEXT UNIQUE,
+                    received_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    message_id TEXT,
+                    active_raw TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    direction TEXT NOT NULL,
+                    expiration TEXT NOT NULL,
+                    signal_time TEXT NOT NULL,
+                    entry_time TEXT,
+                    raw_text TEXT,
+                    mapped INTEGER NOT NULL DEFAULT 0,
+                    filtered INTEGER NOT NULL DEFAULT 0,
+                    filter_reason TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    result_at TEXT,
+                    result_message_id TEXT,
+                    result_text TEXT,
+                    payload TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_telegram_paper_signals_received ON telegram_paper_signals(received_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_telegram_paper_signals_symbol ON telegram_paper_signals(symbol, direction, status);
+
                 CREATE TABLE IF NOT EXISTS runtime_state (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
@@ -466,6 +493,223 @@ class Database:
                 (limit,),
             ).fetchall()
         return [self._decode_row(row) for row in rows]
+
+    def upsert_telegram_paper_signal(
+        self,
+        *,
+        source_id: str,
+        received_at: str,
+        provider: str,
+        message_id: str,
+        active_raw: str,
+        symbol: str,
+        direction: str,
+        expiration: str,
+        signal_time: str,
+        entry_time: str,
+        raw_text: str,
+        mapped: bool,
+        filtered: bool,
+        filter_reason: str,
+        status: str,
+        payload: dict[str, Any],
+    ) -> None:
+        with self._lock, self._connect() as db:
+            db.execute(
+                """
+                INSERT INTO telegram_paper_signals (
+                    source_id, received_at, created_at, provider, message_id, active_raw,
+                    symbol, direction, expiration, signal_time, entry_time, raw_text,
+                    mapped, filtered, filter_reason, status, payload
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_id) DO UPDATE SET
+                    received_at = excluded.received_at,
+                    provider = excluded.provider,
+                    message_id = excluded.message_id,
+                    active_raw = excluded.active_raw,
+                    symbol = excluded.symbol,
+                    direction = excluded.direction,
+                    expiration = excluded.expiration,
+                    signal_time = excluded.signal_time,
+                    entry_time = excluded.entry_time,
+                    raw_text = excluded.raw_text,
+                    mapped = excluded.mapped,
+                    filtered = excluded.filtered,
+                    filter_reason = excluded.filter_reason,
+                    status = CASE
+                        WHEN telegram_paper_signals.status IN ('won', 'lost', 'draw') THEN telegram_paper_signals.status
+                        ELSE excluded.status
+                    END,
+                    payload = excluded.payload
+                """,
+                (
+                    source_id,
+                    received_at,
+                    received_at,
+                    provider,
+                    message_id,
+                    active_raw,
+                    symbol,
+                    direction,
+                    expiration,
+                    signal_time,
+                    entry_time,
+                    raw_text,
+                    1 if mapped else 0,
+                    1 if filtered else 0,
+                    filter_reason,
+                    status,
+                    json.dumps(payload or {}, default=str),
+                ),
+            )
+
+    def close_next_telegram_paper_signal(
+        self,
+        *,
+        symbol: str,
+        status: str,
+        result_at: str,
+        result_message_id: str,
+        result_text: str,
+    ) -> Optional[dict[str, Any]]:
+        if status not in {"won", "lost", "draw"}:
+            return None
+        with self._lock, self._connect() as db:
+            row = db.execute(
+                """
+                SELECT *
+                FROM telegram_paper_signals
+                WHERE symbol = ? AND status = 'pending' AND received_at <= ?
+                ORDER BY received_at ASC, id ASC
+                LIMIT 1
+                """,
+                (symbol, result_at),
+            ).fetchone()
+            if not row:
+                return None
+            db.execute(
+                """
+                UPDATE telegram_paper_signals
+                SET status = ?, result_at = ?, result_message_id = ?, result_text = ?
+                WHERE id = ?
+                """,
+                (status, result_at, result_message_id, result_text, row["id"]),
+            )
+            updated = db.execute("SELECT * FROM telegram_paper_signals WHERE id = ?", (row["id"],)).fetchone()
+        return self._decode_row(updated) if updated else None
+
+    def clear_telegram_paper_since(self, *, hours: int = 24) -> int:
+        hours = max(1, min(hours, 168))
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="seconds")
+        with self._lock, self._connect() as db:
+            cursor = db.execute("DELETE FROM telegram_paper_signals WHERE received_at >= ?", (since,))
+            return int(cursor.rowcount or 0)
+
+    def list_telegram_paper_signals(
+        self,
+        *,
+        limit: int = 100,
+        hours: int = 24,
+        status: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(limit, 500))
+        hours = max(1, min(hours, 168))
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="seconds")
+        params: list[Any] = [since]
+        where = "received_at >= ?"
+        if status:
+            where += " AND status = ?"
+            params.append(status)
+        params.append(limit)
+        with self._lock, self._connect() as db:
+            rows = db.execute(
+                f"""
+                SELECT *
+                FROM telegram_paper_signals
+                WHERE {where}
+                ORDER BY received_at DESC, id DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [self._decode_row(row) for row in rows]
+
+    def telegram_paper_stats(self, *, hours: int = 24) -> dict[str, Any]:
+        hours = max(1, min(hours, 168))
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="seconds")
+        with self._lock, self._connect() as db:
+            total = db.execute(
+                """
+                SELECT
+                    COUNT(*) AS signals,
+                    SUM(CASE WHEN status = 'won' THEN 1 ELSE 0 END) AS wins,
+                    SUM(CASE WHEN status = 'lost' THEN 1 ELSE 0 END) AS losses,
+                    SUM(CASE WHEN status = 'draw' THEN 1 ELSE 0 END) AS draws,
+                    SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+                    SUM(CASE WHEN mapped = 1 THEN 1 ELSE 0 END) AS mapped,
+                    SUM(CASE WHEN filtered = 1 THEN 1 ELSE 0 END) AS filtered
+                FROM telegram_paper_signals
+                WHERE received_at >= ?
+                """,
+                (since,),
+            ).fetchone()
+            by_asset = db.execute(
+                """
+                SELECT
+                    symbol,
+                    direction,
+                    COUNT(*) AS signals,
+                    SUM(CASE WHEN status = 'won' THEN 1 ELSE 0 END) AS wins,
+                    SUM(CASE WHEN status = 'lost' THEN 1 ELSE 0 END) AS losses,
+                    SUM(CASE WHEN status = 'draw' THEN 1 ELSE 0 END) AS draws,
+                    SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+                    SUM(CASE WHEN mapped = 1 THEN 1 ELSE 0 END) AS mapped,
+                    MAX(received_at) AS latest_signal_at
+                FROM telegram_paper_signals
+                WHERE received_at >= ?
+                GROUP BY symbol, direction
+                ORDER BY symbol ASC, direction ASC
+                """,
+                (since,),
+            ).fetchall()
+
+        wins = int(total["wins"] or 0) if total else 0
+        losses = int(total["losses"] or 0) if total else 0
+        draws = int(total["draws"] or 0) if total else 0
+        closed = wins + losses + draws
+        return {
+            "hours": hours,
+            "since": since,
+            "signals": int(total["signals"] or 0) if total else 0,
+            "wins": wins,
+            "losses": losses,
+            "draws": draws,
+            "pending": int(total["pending"] or 0) if total else 0,
+            "mapped": int(total["mapped"] or 0) if total else 0,
+            "filtered": int(total["filtered"] or 0) if total else 0,
+            "win_rate": round((wins / closed * 100), 2) if closed else 0.0,
+            "by_asset": [
+                {
+                    "symbol": row["symbol"],
+                    "direction": row["direction"],
+                    "signals": int(row["signals"] or 0),
+                    "wins": int(row["wins"] or 0),
+                    "losses": int(row["losses"] or 0),
+                    "draws": int(row["draws"] or 0),
+                    "pending": int(row["pending"] or 0),
+                    "mapped": int(row["mapped"] or 0),
+                    "latest_signal_at": row["latest_signal_at"],
+                    "win_rate": round(
+                        (int(row["wins"] or 0) / max(1, int(row["wins"] or 0) + int(row["losses"] or 0) + int(row["draws"] or 0))) * 100,
+                        2,
+                    )
+                    if (int(row["wins"] or 0) + int(row["losses"] or 0) + int(row["draws"] or 0))
+                    else 0.0,
+                }
+                for row in by_asset
+            ],
+        }
 
     def telegram_asset_stats(self, *, min_signals: int = 3, date: Optional[str] = None) -> list[dict[str, Any]]:
         trade_stats = {

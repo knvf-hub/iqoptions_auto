@@ -205,6 +205,10 @@ class TelegramConfig(BaseModel):
     min_history_signals: int = Field(default=3, ge=1, le=500)
     import_history_limit: int = Field(default=2500, ge=100, le=20000)
     default_expiry_minutes: int = Field(default=1, ge=1, le=60)
+    paper_enabled: bool = True
+    paper_channel_keyword: str = "น้องหรั่ง"
+    paper_history_hours: int = Field(default=24, ge=1, le=168)
+    paper_import_limit: int = Field(default=2000, ge=100, le=20000)
 
 
 class AppConfig(BaseModel):

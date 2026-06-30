@@ -317,6 +317,24 @@ def create_app() -> FastAPI:
     ) -> dict:
         return {"items": db.list_telegram_signals(limit=limit, mapped_only=mapped_only)}
 
+    @app.get("/api/telegram-paper/status")
+    async def telegram_paper_status(hours: int = Query(default=24, ge=1, le=168)) -> dict:
+        data = telegram_manager.paper_status()
+        data["stats"] = db.telegram_paper_stats(hours=hours)
+        return data
+
+    @app.get("/api/telegram-paper/signals")
+    async def telegram_paper_signals(
+        limit: int = Query(default=100, ge=1, le=500),
+        hours: int = Query(default=24, ge=1, le=168),
+        status: Optional[str] = None,
+    ) -> dict:
+        return {"items": db.list_telegram_paper_signals(limit=limit, hours=hours, status=status)}
+
+    @app.post("/api/telegram-paper/import-history")
+    async def import_telegram_paper_history() -> dict:
+        return await telegram_manager.import_paper_history()
+
     @app.get("/api/broker/assets")
     async def broker_assets() -> dict:
         try:
@@ -382,6 +400,10 @@ def create_app() -> FastAPI:
     @app.get("/export")
     async def export_page() -> FileResponse:
         return FileResponse(static_dir / "export.html", headers={"Cache-Control": "no-store"})
+
+    @app.get("/paper")
+    async def telegram_paper_page() -> FileResponse:
+        return FileResponse(static_dir / "paper.html", headers={"Cache-Control": "no-store"})
 
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     return app

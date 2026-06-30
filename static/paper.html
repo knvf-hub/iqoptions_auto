@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Telegram Paper · IQ Auto Trader</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=20260621-port-icon" />
+    <script>
+      document.documentElement.dataset.theme = localStorage.getItem("iq-auto-theme") || "light";
+    </script>
+    <link rel="stylesheet" href="/static/styles.css?v=20260630-paper-v1" />
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+    <script src="/static/paper.js?v=20260630-paper-v1" defer></script>
+  </head>
+  <body>
+    <div class="app-shell export-shell paper-shell">
+      <header class="topbar">
+        <div>
+          <h1>Telegram Paper</h1>
+          <div class="subline">
+            <span class="badge warning">TELEGRAM</span>
+            <span class="badge success">PAPER</span>
+            <span id="paperStateBadge" class="badge neutral">idle</span>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="paperThemeToggleBtn" class="icon-btn" type="button" title="Switch theme" aria-label="Switch theme">
+            <i data-lucide="moon"></i>
+          </button>
+          <button id="paperImportBtn" class="btn" type="button" title="Import last 24h">
+            <span class="btn-spinner" aria-hidden="true"></span>
+            <i data-lucide="history"></i><span data-label>Import 24h</span>
+          </button>
+          <a class="btn" href="/" title="Back to trade desk">
+            <i data-lucide="arrow-left"></i><span>Back</span>
+          </a>
+          <button id="paperRefreshBtn" class="icon-btn" type="button" title="Refresh">
+            <i data-lucide="rotate-cw"></i>
+          </button>
+        </div>
+      </header>
+
+      <main class="paper-layout">
+        <section class="panel paper-status-panel">
+          <div class="panel-head">
+            <h2>Source</h2>
+            <span id="paperChannel" class="muted">-</span>
+          </div>
+          <div class="metric-grid paper-metrics">
+            <div class="metric-card"><span>Signals</span><strong id="paperSignals">0</strong></div>
+            <div class="metric-card"><span>Wins</span><strong id="paperWins" class="positive">0</strong></div>
+            <div class="metric-card"><span>Losses</span><strong id="paperLosses" class="negative">0</strong></div>
+            <div class="metric-card"><span>Win Rate</span><strong id="paperWinRate">0.0%</strong></div>
+            <div class="metric-card"><span>Pending</span><strong id="paperPending">0</strong></div>
+            <div class="metric-card"><span>Filtered</span><strong id="paperFiltered">0</strong></div>
+          </div>
+        </section>
+
+        <section class="panel paper-summary-panel">
+          <div class="panel-head">
+            <h2>Pair Summary</h2>
+            <span class="muted">Last 24 hours</span>
+          </div>
+          <div class="table-wrap paper-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Side</th>
+                  <th>Signals</th>
+                  <th>W/L</th>
+                  <th>Win Rate</th>
+                  <th>Pending</th>
+                </tr>
+              </thead>
+              <tbody id="paperSummaryBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel paper-signals-panel">
+          <div class="panel-head">
+            <h2>Paper Signals</h2>
+            <div class="history-controls">
+              <select id="paperStatusFilter">
+                <option value="">All</option>
+                <option value="pending">Pending</option>
+                <option value="won">Won</option>
+                <option value="lost">Lost</option>
+                <option value="filtered">Filtered</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrap paper-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Received</th>
+                  <th>Asset</th>
+                  <th>Side</th>
+                  <th>Signal</th>
+                  <th>Status</th>
+                  <th>Filter</th>
+                  <th>Result</th>
+                </tr>
+              </thead>
+              <tbody id="paperSignalsBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </div>
+  </body>
+</html>
