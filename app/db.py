@@ -479,6 +479,29 @@ class Database:
                 ),
             )
 
+    def telegram_signal_exists(
+        self,
+        *,
+        provider: str,
+        active_raw: str,
+        direction: str,
+        signal_time: str,
+    ) -> bool:
+        with self._lock, self._connect() as db:
+            row = db.execute(
+                """
+                SELECT 1
+                FROM telegram_signals
+                WHERE provider = ?
+                  AND active_raw = ?
+                  AND direction = ?
+                  AND signal_time = ?
+                LIMIT 1
+                """,
+                (provider, active_raw, direction, signal_time),
+            ).fetchone()
+        return row is not None
+
     def list_telegram_signals(self, limit: int = 50, *, mapped_only: bool = False) -> list[dict[str, Any]]:
         limit = max(1, min(limit, 200))
         where = "WHERE mapped = 1" if mapped_only else ""
@@ -490,9 +513,25 @@ class Database:
                 ORDER BY received_at DESC, id DESC
                 LIMIT ?
                 """,
-                (limit,),
+                (min(limit * 5, 500),),
             ).fetchall()
-        return [self._decode_row(row) for row in rows]
+        items: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        for row in rows:
+            item = self._decode_row(row)
+            key = (
+                str(item.get("provider") or ""),
+                str(item.get("active_raw") or ""),
+                str(item.get("direction") or ""),
+                str(item.get("signal_time") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(item)
+            if len(items) >= limit:
+                break
+        return items
 
     def upsert_telegram_paper_signal(
         self,

@@ -743,6 +743,14 @@ class TelegramSignalManager:
         symbol = resolved["symbol"]
         mapped = bool(resolved["mapped"])
         seconds_until_entry = self._seconds_until_entry(parsed.signal_time)
+        if self.db.telegram_signal_exists(
+            provider=channel_filter,
+            active_raw=parsed.active_raw,
+            direction=parsed.direction,
+            signal_time=parsed.signal_time,
+        ):
+            self._handled_prime_source_ids.add(source_id)
+            return
         if seconds_until_entry < 0:
             self._latest_signal = {
                 "received_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
