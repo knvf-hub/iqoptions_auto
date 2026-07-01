@@ -1019,13 +1019,14 @@ class TelegramSignalManager:
             self._latest_signal = payload
             self.db.add_event("info", "telegram", "Telegram signal skipped because bot is stopped", payload)
             return
-        self._latest_signal = {**signal, "order_status": "opening", "order_message": "sending_order"}
+        self._latest_signal = {**signal, "order_status": "waiting", "order_message": "waiting_for_engine_slot"}
         result = await self.engine.external_signal_trade(
             asset=signal["symbol"],
             direction=signal["direction"],
             duration_minutes=self._expiry_minutes(signal.get("expiration", "M1")),
             reason="telegram_signal",
             raw_signal=signal,
+            lock_timeout_sec=2.0,
         )
         placed = bool(result.get("placed"))
         payload = {

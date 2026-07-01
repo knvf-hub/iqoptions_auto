@@ -587,8 +587,15 @@ class TradingEngine:
         duration_minutes: int,
         reason: str,
         raw_signal: Optional[dict[str, Any]] = None,
+        lock_timeout_sec: Optional[float] = None,
     ) -> dict[str, Any]:
-        async with self._lock:
+        acquired = False
+        try:
+            if lock_timeout_sec is None:
+                await self._lock.acquire()
+            else:
+                await asyncio.wait_for(self._lock.acquire(), timeout=max(0.1, float(lock_timeout_sec)))
+            acquired = True
             signal = TradeSignal(
                 action=direction,
                 confidence=1.0,
@@ -640,6 +647,23 @@ class TradingEngine:
                 raw_extra={"telegram_signal": raw_signal or {}},
             )
             return {"placed": True, "trade": trade}
+        except asyncio.TimeoutError:
+            self.db.add_event(
+                "warning",
+                "telegram",
+                "Telegram trade skipped because engine was busy",
+                {
+                    "asset": asset,
+                    "direction": direction,
+                    "reason": "engine_busy_before_order",
+                    "lock_timeout_sec": lock_timeout_sec,
+                    "signal": raw_signal or {},
+                },
+            )
+            return {"placed": False, "reason": "engine_busy_before_order"}
+        finally:
+            if acquired:
+                self._lock.release()
 
     async def _select_signal(self) -> dict[str, Any]:
         timeout_sec = self.config.trading.signal_scan_timeout_sec
