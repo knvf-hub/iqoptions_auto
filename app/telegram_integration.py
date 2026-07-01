@@ -925,7 +925,22 @@ class TelegramSignalManager:
         self._latest_signal = {**signal, "order_status": "waiting", "order_message": "waiting_for_entry_time"}
         task = asyncio.create_task(self._place_at_entry(signal))
         self._signal_tasks.add(task)
-        task.add_done_callback(self._signal_tasks.discard)
+        task.add_done_callback(lambda done_task: self._finish_signal_task(done_task, signal))
+
+    def _finish_signal_task(self, task: asyncio.Task, signal: dict[str, Any]) -> None:
+        self._signal_tasks.discard(task)
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            payload = {
+                **signal,
+                "order_status": "failed",
+                "order_message": f"telegram_task_failed:{exc}",
+            }
+            self._latest_signal = payload
+            self.db.add_event("error", "telegram", "Telegram signal task failed", payload)
 
     def _signal_key(self, signal: dict[str, Any]) -> str:
         return "|".join(

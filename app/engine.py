@@ -1484,9 +1484,9 @@ class TradingEngine:
             return False, "consecutive_loss_limit_reached"
         if self.config.trading.one_open_trade_at_a_time and self.db.count_open_trades() > 0:
             return False, "open_trade_exists"
-        if stats["last_trade_at"] and not ignore_cooldown:
+        if today_stats["last_trade_at"] and not ignore_cooldown:
             try:
-                last = datetime.fromisoformat(stats["last_trade_at"])
+                last = datetime.fromisoformat(today_stats["last_trade_at"])
                 elapsed = (datetime.now(timezone.utc) - last).total_seconds()
                 if elapsed < self.config.risk.cooldown_sec:
                     return False, "cooldown_active"
