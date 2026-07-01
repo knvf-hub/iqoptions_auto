@@ -116,6 +116,15 @@ class TelegramControlsRequest(BaseModel):
     enabled: bool = False
     follow_signals: bool = False
     follow_latest_pending: bool = True
+    signal_source: str = "sala"
+
+    @field_validator("signal_source")
+    @classmethod
+    def validate_signal_source(cls, value: str) -> str:
+        value = str(value or "sala").lower().strip()
+        if value not in {"sala", "nongrang"}:
+            raise ValueError("signal_source must be sala or nongrang")
+        return value
 
 
 class LoginRequest(BaseModel):

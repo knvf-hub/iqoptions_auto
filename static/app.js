@@ -537,10 +537,15 @@ function renderTelegram(telegram = {}) {
   state.telegram = telegram;
   const enabledInput = $("#telegramEnabledInput");
   const followInput = $("#telegramFollowInput");
+  const sourceInput = $("#telegramSourceInput");
   if (enabledInput) enabledInput.checked = Boolean(telegram.enabled);
   if (followInput) {
     followInput.checked = Boolean(telegram.follow_signals);
     followInput.disabled = !Boolean(telegram.enabled);
+  }
+  if (sourceInput) {
+    const source = telegram.signal_source || "sala";
+    if (sourceInput.value !== source) sourceInput.value = source;
   }
   renderSwitchText("#telegramEnabledInput", "#telegramEnabledText");
   renderSwitchText("#telegramFollowInput", "#telegramFollowText");
@@ -553,13 +558,16 @@ function renderTelegram(telegram = {}) {
   }
 
   const latest = telegram.latest_signal || {};
-  $("#telegramChannel").textContent = telegram.channel || "-";
+  const source = telegram.signal_source || "sala";
+  $("#telegramChannel").textContent = telegram.active_channel || telegram.channel || "-";
   $("#telegramSignal").textContent = latest.symbol
     ? `${latest.symbol} ${String(latest.direction || "").toUpperCase()}`
     : "-";
   $("#telegramEntry").textContent = latest.entry_time || latest.signal_time || "-";
   $("#telegramHistory").textContent = `${telegram.mapped || 0}/${telegram.imported || 0} mapped`;
-  $("#telegramMtg").textContent = telegram.follow_signals ? "Fixed 1x / 2x / 4x" : "Fixed when Follow is on";
+  $("#telegramMtg").textContent = source === "nongrang"
+    ? "Single shot"
+    : (telegram.follow_signals ? "Fixed 1x / 2x / 4x" : "Fixed when Follow is on");
   $("#telegramError").textContent =
     reasonText(
       latest.order_message ||
@@ -1176,6 +1184,7 @@ async function syncTelegramControls() {
   const payload = {
     enabled: Boolean($("#telegramEnabledInput")?.checked),
     follow_signals: Boolean($("#telegramFollowInput")?.checked),
+    signal_source: $("#telegramSourceInput")?.value || "sala",
   };
   if (!payload.enabled) payload.follow_signals = false;
   const telegram = await api("/api/telegram/controls", {
@@ -1186,7 +1195,7 @@ async function syncTelegramControls() {
   renderTelegram(telegram);
   await refreshAll({ force: true });
   await loadEvents({ reset: true });
-  showToast(`Telegram ${payload.enabled ? "enabled" : "disabled"}`);
+  showToast(`Telegram ${payload.enabled ? "enabled" : "disabled"} (${payload.signal_source === "nongrang" ? "น้องหรั่ง" : "SALA"})`);
 }
 
 async function postAction(path, label, action = "") {
@@ -1396,6 +1405,7 @@ function bindEvents() {
   $("#martingale3StepInput").addEventListener("change", () => syncMartingaleMode("three_step"));
   $("#telegramEnabledInput").addEventListener("change", syncTelegramControls);
   $("#telegramFollowInput").addEventListener("change", syncTelegramControls);
+  $("#telegramSourceInput")?.addEventListener("change", syncTelegramControls);
   $("#statusFilter").addEventListener("change", resetHistoryPage);
   $("#historyLimit").addEventListener("change", resetHistoryPage);
   $("#historyPrevBtn")?.addEventListener("click", () => changeHistoryPage(-1));

@@ -194,6 +194,7 @@ class TelegramConfig(BaseModel):
     enabled: bool = False
     follow_signals: bool = False
     follow_latest_pending: bool = True
+    signal_source: str = "sala"
     api_id: Union[int, str] = ""
     api_hash: str = ""
     phone: str = ""
@@ -209,6 +210,14 @@ class TelegramConfig(BaseModel):
     paper_channel_keyword: str = "น้องหรั่ง"
     paper_history_hours: int = Field(default=24, ge=1, le=168)
     paper_import_limit: int = Field(default=2000, ge=100, le=20000)
+
+    @field_validator("signal_source")
+    @classmethod
+    def validate_signal_source(cls, value: str) -> str:
+        value = str(value or "sala").lower().strip()
+        if value not in {"sala", "nongrang"}:
+            raise ValueError("telegram.signal_source must be sala or nongrang")
+        return value
 
 
 class AppConfig(BaseModel):

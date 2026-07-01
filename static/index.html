@@ -9,9 +9,9 @@
   <script>
     document.documentElement.dataset.theme = localStorage.getItem("iq-auto-theme") || "light";
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=20260628-history-summary-modal-map-v1" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260701-telegram-source-switch-v1" />
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-  <script src="/static/app.js?v=20260628-history-summary-modal-map-v1" defer></script>
+  <script src="/static/app.js?v=20260701-telegram-source-switch-v1" defer></script>
 </head>
 
 <body>
@@ -330,6 +330,13 @@
           </div>
         </div>
         <div class="telegram-toggles">
+          <label class="telegram-source-field">
+            <span>Source</span>
+            <select id="telegramSourceInput">
+              <option value="sala">SALA</option>
+              <option value="nongrang">น้องหรั่ง</option>
+            </select>
+          </label>
           <label class="switch-field compact-switch">
             <span>Listen</span>
             <span class="switch-control">

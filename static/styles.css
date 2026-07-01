@@ -526,6 +526,16 @@ h2 {
   margin-bottom: 6px;
 }
 
+.telegram-source-field {
+  display: grid;
+  gap: 4px;
+}
+
+.telegram-source-field span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .compact-switch {
   min-height: 30px;
   padding: 4px 9px;

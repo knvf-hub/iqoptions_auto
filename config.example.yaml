@@ -135,6 +135,8 @@ server:
 telegram:
   enabled: false
   follow_signals: false
+  follow_latest_pending: true
+  signal_source: sala
   api_id: ""
   api_hash: ""
   phone: ""

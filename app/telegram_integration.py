@@ -233,11 +233,29 @@ class TelegramSignalManager:
     async def shutdown(self) -> None:
         await self.stop()
 
+    def _signal_source(self) -> str:
+        value = str(getattr(self.config.telegram, "signal_source", "sala") or "sala").lower().strip()
+        return value if value in {"sala", "nongrang"} else "sala"
+
+    def _source_channel_filter(self, source: Optional[str] = None) -> str:
+        source = source or self._signal_source()
+        if source == "nongrang":
+            return str(self.config.telegram.paper_channel_keyword or "")
+        return str(self.config.telegram.channel or "")
+
+    def _source_label(self, source: Optional[str] = None) -> str:
+        return "น้องหรั่ง" if (source or self._signal_source()) == "nongrang" else "SALA"
+
     def status(self, *, include_summary: bool = False) -> dict[str, Any]:
+        source = self._signal_source()
         data = {
             "enabled": self.config.telegram.enabled,
             "follow_signals": self.config.telegram.follow_signals,
             "follow_latest_pending": self.config.telegram.follow_latest_pending,
+            "signal_source": source,
+            "active_channel": self._source_channel_filter(source),
+            "source_label": self._source_label(source),
+            "martingale_mode": "single_shot" if source == "nongrang" else "fixed_1x_2x_4x",
             "running": self._running,
             "channel": self.config.telegram.channel,
             "latest_signal": self._latest_signal,
@@ -257,20 +275,30 @@ class TelegramSignalManager:
         enabled: bool,
         follow_signals: bool,
         follow_latest_pending: bool = True,
+        signal_source: str = "sala",
     ) -> dict[str, Any]:
         was_enabled = self.config.telegram.enabled
         was_following = self.config.telegram.follow_signals
+        previous_source = self._signal_source()
+        signal_source = str(signal_source or "sala").lower().strip()
+        if signal_source not in {"sala", "nongrang"}:
+            signal_source = "sala"
         self.config.telegram.enabled = bool(enabled)
         self.config.telegram.follow_signals = bool(follow_signals)
         self.config.telegram.follow_latest_pending = bool(follow_latest_pending)
+        self.config.telegram.signal_source = signal_source
         self.engine.config.telegram.enabled = self.config.telegram.enabled
         self.engine.config.telegram.follow_signals = self.config.telegram.follow_signals
         self.engine.config.telegram.follow_latest_pending = self.config.telegram.follow_latest_pending
+        self.engine.config.telegram.signal_source = self.config.telegram.signal_source
         if self._should_listen():
             await self.start()
         else:
             await self.stop()
-        if self.config.telegram.enabled and self.config.telegram.follow_signals and (not was_enabled or not was_following):
+        source_changed = previous_source != self.config.telegram.signal_source
+        if self.config.telegram.enabled and self.config.telegram.follow_signals and (
+            not was_enabled or not was_following or source_changed
+        ):
             await self.engine.activate_telegram_follow_mode()
             if self.config.telegram.follow_latest_pending:
                 self.schedule_prime_latest_pending_signal()
@@ -287,6 +315,7 @@ class TelegramSignalManager:
                 "enabled": self.config.telegram.enabled,
                 "follow_signals": self.config.telegram.follow_signals,
                 "follow_latest_pending": self.config.telegram.follow_latest_pending,
+                "signal_source": self.config.telegram.signal_source,
             },
         )
         return self.status()
@@ -653,11 +682,28 @@ class TelegramSignalManager:
                     if message_date
                     else utc_now()
                 )
-                if self.config.telegram.paper_enabled and paper_keyword and paper_keyword.lower() in title.lower():
+                source = self._signal_source()
+                is_paper_channel = bool(paper_keyword and paper_keyword.lower() in title.lower())
+                if self.config.telegram.paper_enabled and is_paper_channel:
                     if self._handle_paper_result_message(raw_text, title, message_id, received_at=received_at):
                         return
-                    if self._handle_paper_signal_message(raw_text, title, message_id, received_at=received_at):
+                    saved = self._handle_paper_signal_message(raw_text, title, message_id, received_at=received_at)
+                    if source == "nongrang":
+                        parsed = parse_usa_paper_signal(raw_text)
+                        if parsed:
+                            await self._handle_live_signal(
+                                parsed,
+                                title,
+                                source="nongrang",
+                                source_id=f"nongrang:{title}:{message_id}:{parsed.signal_time}:{parsed.active_raw}:{parsed.direction}",
+                                received_at=received_at,
+                                martingale_enabled=False,
+                            )
                         return
+                    if saved:
+                        return
+                if source != "sala":
+                    return
                 if channel_filter and channel_filter.lower() not in title.lower():
                     return
                 parsed = parse_signal(raw_text)
@@ -695,11 +741,20 @@ class TelegramSignalManager:
 
     async def _prime_latest_pending_signal(self, client: Any, *, quiet: bool = False) -> None:
         self._prime_on_connect = False
-        channel_filter = str(self.config.telegram.channel or "")
+        source = self._signal_source()
+        channel_filter = self._source_channel_filter(source)
+        parser = parse_usa_paper_signal if source == "nongrang" else parse_signal
+        source_name = "nongrang_prime" if source == "nongrang" else "prime"
+        martingale_enabled = source != "nongrang"
         try:
             entity = await self._find_channel_entity(client, channel_filter)
             if entity is None:
-                self.db.add_event("warning", "telegram", "Telegram latest signal prime skipped", {"reason": "channel_not_found"})
+                self.db.add_event(
+                    "warning",
+                    "telegram",
+                    "Telegram latest signal prime skipped",
+                    {"reason": "channel_not_found", "signal_source": source, "channel": channel_filter},
+                )
                 return
             messages = await client.get_messages(entity, limit=20)
         except Exception as exc:
@@ -708,17 +763,23 @@ class TelegramSignalManager:
 
         latest_parsed: Optional[tuple[ParsedTelegramSignal, Any]] = None
         for message in messages:
-            parsed = parse_signal(str(getattr(message, "raw_text", "") or ""))
+            raw_text = str(getattr(message, "raw_text", "") or "")
+            parsed = parser(raw_text)
             if parsed:
                 latest_parsed = (parsed, message)
                 break
         if latest_parsed is None:
             if not quiet:
-                self.db.add_event("info", "telegram", "Telegram latest signal prime skipped", {"reason": "no_signal_in_recent_messages"})
+                self.db.add_event(
+                    "info",
+                    "telegram",
+                    "Telegram latest signal prime skipped",
+                    {"reason": "no_signal_in_recent_messages", "signal_source": source},
+                )
             return
 
         parsed, message = latest_parsed
-        source_id = f"prime:{getattr(message, 'id', '')}:{parsed.signal_time}:{parsed.active_raw}:{parsed.direction}"
+        source_id = f"{source_name}:{getattr(message, 'id', '')}:{parsed.signal_time}:{parsed.active_raw}:{parsed.direction}"
         if source_id in self._handled_prime_source_ids:
             return
         if not self.engine.status(include_broker=False).get("running"):
@@ -735,8 +796,9 @@ class TelegramSignalManager:
                 "mapped": False,
                 "order_status": "skipped",
                 "order_message": "bot_is_stopped",
-                "source": "prime",
+                "source": source_name,
                 "source_id": source_id,
+                "martingale_enabled": martingale_enabled,
             }
             return
         resolved = await self._resolve_live_symbol(parsed.active_raw)
@@ -749,8 +811,13 @@ class TelegramSignalManager:
             direction=parsed.direction,
             signal_time=parsed.signal_time,
         ):
-            self._handled_prime_source_ids.add(source_id)
-            return
+            retry_stopped_prime = (
+                self._latest_signal.get("source_id") == source_id
+                and self._latest_signal.get("order_message") == "bot_is_stopped"
+            )
+            if not retry_stopped_prime:
+                self._handled_prime_source_ids.add(source_id)
+                return
         if seconds_until_entry < 0:
             self._latest_signal = {
                 "received_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -767,8 +834,9 @@ class TelegramSignalManager:
                 "candidates": resolved["candidates"],
                 "order_status": "skipped",
                 "order_message": "latest_signal_entry_time_passed",
-                "source": "prime",
+                "source": source_name,
                 "source_id": source_id,
+                "martingale_enabled": martingale_enabled,
             }
             self.db.upsert_telegram_signal(
                 source_id=source_id,
@@ -782,7 +850,7 @@ class TelegramSignalManager:
                 entry_time=self._latest_signal["entry_time"],
                 raw_text=parsed.raw_text,
                 mapped=mapped,
-                source="prime",
+                source=source_name,
                 status="skipped",
                 payload=self._latest_signal,
             )
@@ -806,9 +874,10 @@ class TelegramSignalManager:
         await self._handle_live_signal(
             parsed,
             channel_filter,
-            source="prime",
+            source=source_name,
             source_id=source_id,
             received_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            martingale_enabled=martingale_enabled,
         )
 
     async def _find_channel_entity(self, client: Any, channel_filter: str) -> Any:
@@ -831,6 +900,7 @@ class TelegramSignalManager:
         source: str = "live",
         source_id: Optional[str] = None,
         received_at: Optional[str] = None,
+        martingale_enabled: bool = True,
     ) -> None:
         if self.config.telegram.follow_signals and not self.engine.status(include_broker=False).get("running"):
             signal = {
@@ -848,6 +918,7 @@ class TelegramSignalManager:
                 "order_message": "bot_is_stopped",
                 "source": source,
                 "source_id": source_id or f"{source}:{channel}:{parsed.signal_time}:{parsed.active_raw}:{parsed.direction}",
+                "martingale_enabled": bool(martingale_enabled),
             }
             self._latest_signal = signal
             self.db.add_event("info", "telegram", "Telegram signal skipped because bot is stopped", signal)
@@ -857,7 +928,7 @@ class TelegramSignalManager:
         mapped = bool(resolved["mapped"])
         received_at = received_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         source_id = source_id or f"live:{channel}:{parsed.signal_time}:{parsed.active_raw}:{parsed.direction}"
-        if source == "prime" and source_id in self._handled_prime_source_ids:
+        if source.endswith("prime") and source_id in self._handled_prime_source_ids:
             return
         signal = {
             "received_at": received_at,
@@ -876,6 +947,7 @@ class TelegramSignalManager:
             "order_message": resolved["reason"] if mapped else f"asset_not_open_or_mapped:{resolved['reason']}",
             "source": source,
             "source_id": source_id,
+            "martingale_enabled": bool(martingale_enabled),
         }
         self._latest_signal = signal
         self.db.upsert_telegram_signal(
@@ -895,7 +967,7 @@ class TelegramSignalManager:
             payload=signal,
         )
         self.db.add_event("info", "telegram", "Telegram signal received", signal)
-        if source == "prime":
+        if source.endswith("prime"):
             self._handled_prime_source_ids.add(source_id)
         if not mapped:
             self.db.add_event(
@@ -1041,6 +1113,7 @@ class TelegramSignalManager:
             duration_minutes=self._expiry_minutes(signal.get("expiration", "M1")),
             reason="telegram_signal",
             raw_signal=signal,
+            martingale_enabled=bool(signal.get("martingale_enabled", True)),
             lock_timeout_sec=2.0,
         )
         placed = bool(result.get("placed"))

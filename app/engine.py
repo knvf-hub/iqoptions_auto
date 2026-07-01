@@ -587,6 +587,7 @@ class TradingEngine:
         duration_minutes: int,
         reason: str,
         raw_signal: Optional[dict[str, Any]] = None,
+        martingale_enabled: bool = True,
         lock_timeout_sec: Optional[float] = None,
     ) -> dict[str, Any]:
         acquired = False
@@ -617,8 +618,14 @@ class TradingEngine:
                     },
                 )
                 return {"placed": False, "reason": rule_reason}
-            martingale = self._telegram_martingale_state(level=0)
-            amount = float(martingale["next_amount"])
+            if martingale_enabled:
+                martingale: Optional[dict[str, Any]] = self._telegram_martingale_state(level=0)
+                amount = float(martingale["next_amount"])
+                strategy = "telegram_signal"
+            else:
+                martingale = None
+                amount = round(float(self.config.trading.amount), 2)
+                strategy = "telegram_signal_single"
             allowed, risk_reason = self._risk_guard(signal, amount=amount)
             if not allowed:
                 self.db.add_event(
@@ -641,10 +648,13 @@ class TradingEngine:
                 duration_minutes=duration_minutes,
                 confidence=1.0,
                 reason=reason,
-                strategy="telegram_signal",
+                strategy=strategy,
                 martingale=martingale,
                 expires_at_override=self._telegram_signal_expires_at(raw_signal or {}),
-                raw_extra={"telegram_signal": raw_signal or {}},
+                raw_extra={
+                    "telegram_signal": raw_signal or {},
+                    "telegram_martingale_enabled": bool(martingale_enabled),
+                },
             )
             return {"placed": True, "trade": trade}
         except asyncio.TimeoutError:
