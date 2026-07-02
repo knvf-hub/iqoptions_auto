@@ -323,6 +323,8 @@ class TradingEngine:
         async with self._lock:
             self._last_tick_at = utc_now()
             await self._settle_due_trades()
+            if not self._running:
+                return self.status()
 
             # MTG 3-step: ถ้า settle ผ่าน API แล้วเกิด pending ให้ยิงต่อทันที
             # ไม่ต้องรอรอบ tick / ไม่ต้องรอวินาที 59-00
@@ -423,6 +425,12 @@ class TradingEngine:
             self._last_tick_at = utc_now()
 
             await self._settle_due_trades()
+            if not self._running:
+                return {
+                    "placed": False,
+                    "reason": self._last_error or "bot_stopped",
+                    "signal": self._last_signal,
+                }
 
             strategy_martingale = self._active_strategy_martingale_pending()
 
@@ -524,6 +532,8 @@ class TradingEngine:
             allowed, reason = self._risk_guard(signal, amount=trade_amount)
             if not allowed:
                 self._record_skip(reason, selected)
+                if reason == "take_profit_reached":
+                    await self._stop_for_take_profit(trigger="risk_guard")
                 return {"placed": False, "reason": reason, "signal": self._last_signal}
 
             if not await self._wait_for_entry_second():
@@ -566,6 +576,8 @@ class TradingEngine:
             )
             allowed, reason = self._risk_guard(synthetic_signal, manual=True, amount=amount)
             if not allowed:
+                if reason == "take_profit_reached":
+                    await self._stop_for_take_profit(trigger="manual_trade")
                 raise BrokerError(reason)
             trade = await self._place_trade(
                 asset=asset,
@@ -639,6 +651,8 @@ class TradingEngine:
                         "signal": raw_signal or {},
                     },
                 )
+                if risk_reason == "take_profit_reached":
+                    await self._stop_for_take_profit(trigger="telegram_signal")
                 return {"placed": False, "reason": risk_reason}
             trade = await self._place_trade(
                 asset=asset,
@@ -912,6 +926,7 @@ class TradingEngine:
 
     async def _settle_due_trades(self) -> None:
         due = self.db.list_due_open_trades()
+        take_profit_stop_payload: Optional[dict[str, Any]] = None
         for trade in due:
             try:
                 profit, raw = await asyncio.wait_for(
@@ -978,8 +993,21 @@ class TradingEngine:
                 {"id": trade["id"], "order_id": trade["order_id"], "profit": round(float(profit), 2)},
             )
             await self._refresh_balance_after_settlement(trade, round(float(profit), 2))
+            if self._take_profit_reached():
+                take_profit_stop_payload = {
+                    "trigger": "trade_settlement",
+                    "trade_id": trade["id"],
+                    "order_id": trade["order_id"],
+                    "profit": round(float(profit), 2),
+                    "session_profit": self.db.daily_stats(since=self.stats_since_at())["profit"],
+                    "take_profit": self.config.risk.take_profit,
+                }
+                self._clear_strategy_martingale_pending()
+                continue
             self._update_strategy_martingale_after_close(trade, round(float(profit), 2))
             await self._maybe_place_telegram_martingale(trade, round(float(profit), 2))
+        if take_profit_stop_payload:
+            await self._stop_for_take_profit(**take_profit_stop_payload)
 
     def _trade_settlement_is_stale(self, trade: dict[str, Any]) -> bool:
         try:
@@ -1019,6 +1047,8 @@ class TradingEngine:
 
         allowed, reason = self._risk_guard(signal, amount=amount, ignore_cooldown=True)
         if not allowed:
+            if reason == "take_profit_reached":
+                await self._stop_for_take_profit(trigger="strategy_martingale")
             self._record_strategy_martingale_skip(reason, pending)
             return {"placed": False, "reason": reason, "signal": self._last_signal}
 
@@ -1137,6 +1167,8 @@ class TradingEngine:
         amount = float(next_martingale["next_amount"])
         allowed, reason = self._risk_guard(signal, amount=amount, ignore_cooldown=True)
         if not allowed:
+            if reason == "take_profit_reached":
+                await self._stop_for_take_profit(trigger="telegram_martingale")
             self.db.add_event(
                 "info",
                 "telegram",
@@ -1457,6 +1489,51 @@ class TradingEngine:
         if allow_directions and direction not in allow_directions:
             return False, "asset_direction_disabled"
         return True, ""
+
+    def _take_profit_reached(self) -> bool:
+        take_profit = float(self.config.risk.take_profit or 0)
+        if take_profit <= 0:
+            return False
+        session_stats = self.db.daily_stats(since=self.stats_since_at())
+        return float(session_stats.get("profit") or 0) >= take_profit
+
+    async def _stop_for_take_profit(self, *, trigger: str, **extra: Any) -> bool:
+        if not self._take_profit_reached():
+            return False
+
+        session_stats = self.db.daily_stats(since=self.stats_since_at())
+        payload = {
+            "trigger": trigger,
+            "session_profit": session_stats["profit"],
+            "take_profit": self.config.risk.take_profit,
+            **extra,
+        }
+        was_running = self._running
+        self._running = False
+        self._next_tick_at = None
+        self._last_error = "take_profit_reached"
+        self._clear_strategy_martingale_pending()
+        self._last_signal = {
+            "asset": "",
+            "label": "risk",
+            "action": "stop",
+            "confidence": 0.0,
+            "reason": "take_profit_reached",
+            "tradable": False,
+            "reject_reason": "take_profit_reached",
+            "eligible_count": 0,
+            "rejections": [],
+            "close_price": None,
+            "metrics": payload,
+            "top_candidate": None,
+            "auto_select_asset": False,
+            "candidates": [],
+            "created_at": self._last_tick_at or utc_now(),
+        }
+        self.db.add_event("info", "risk", "Take profit reached; bot stopped", payload)
+        if was_running:
+            await self._safe_reset_broker(reason="take_profit_reached")
+        return True
 
     def _risk_guard(
         self,
