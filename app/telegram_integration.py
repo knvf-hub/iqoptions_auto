@@ -84,6 +84,7 @@ CUSTOM_MAP = {
 }
 
 FOREX_RE = re.compile(r"^[A-Z]{6}$")
+ACTIVE_PRODUCT_RE = re.compile(r"\b(BLITZ|BIN[ÁA]RIA|BINARY|DIGITAL|TURBO)\b", re.IGNORECASE)
 
 
 @dataclass
@@ -111,7 +112,7 @@ def parse_signal(text: str) -> Optional[ParsedTelegramSignal]:
         return None
     raw_direction = direction.group(1).upper()
     return ParsedTelegramSignal(
-        active_raw=active.group(1).strip(),
+        active_raw=clean_active_label(active.group(1)),
         expiration=expiration.group(1).strip().upper() if expiration else "M1",
         direction="call" if raw_direction in {"COMPRA", "CALL"} else "put",
         signal_time=trade_time.group(1).strip(),
@@ -154,14 +155,27 @@ def parse_usa_paper_result(text: str) -> Optional[ParsedPaperResult]:
     )
 
 
+def clean_active_label(active: str) -> str:
+    value = str(active or "").strip()
+    if "|" in value:
+        parts = [part.strip() for part in value.split("|") if part.strip()]
+        if parts:
+            value = parts[-1]
+    value = ACTIVE_PRODUCT_RE.sub(" ", value)
+    value = re.sub(r"^[^\w/]+", "", value, flags=re.UNICODE)
+    value = re.sub(r"\s+", " ", value)
+    return value.strip(" -|")
+
+
 def normalize_active(active: str) -> str:
-    value = active.upper().strip()
-    value = value.replace(" ", "")
-    value = value.replace("(OTC)", "-OTC")
+    value = clean_active_label(active).upper().strip()
+    value = value.replace("(OTC)", " OTC")
+    value = re.sub(r"\s*-?\s*\bOTC\b", "-OTC", value)
     value = value.replace("_", "")
     value = value.replace("/", "")
     value = value.replace(".", "")
-    return value.replace("--", "-")
+    value = re.sub(r"[^A-Z0-9-]+", "", value)
+    return re.sub(r"-+", "-", value).strip("-")
 
 
 def map_active_to_symbol(active: str) -> str:
@@ -170,8 +184,8 @@ def map_active_to_symbol(active: str) -> str:
 
 
 def candidate_symbols_for_active(active: str) -> list[str]:
-    raw = str(active or "").upper()
-    is_otc = "(OTC)" in raw or raw.strip().endswith("-OTC")
+    raw = clean_active_label(active).upper()
+    is_otc = "(OTC)" in raw or bool(re.search(r"\bOTC\b", raw)) or raw.strip().endswith("-OTC")
     key = normalize_active(active)
     candidates: list[str] = []
 
