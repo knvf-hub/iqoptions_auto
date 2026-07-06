@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -398,6 +399,15 @@ def create_app() -> FastAPI:
         since = engine.stats_since_at() if scope == "session" else None
         return {"items": db.equity_curve(limit=limit, since=since)}
 
+    @app.get("/api/pnl/month")
+    async def pnl_month(month: str = Query(pattern=r"^\d{4}-\d{2}$")) -> dict:
+        if not re.match(r"^\d{4}-\d{2}$", month):
+            raise HTTPException(status_code=400, detail="month must be YYYY-MM")
+        try:
+            return db.pnl_calendar(month=month)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/")
     async def index() -> FileResponse:
         return FileResponse(static_dir / "index.html", headers={"Cache-Control": "no-store"})
@@ -413,6 +423,10 @@ def create_app() -> FastAPI:
     @app.get("/paper")
     async def telegram_paper_page() -> FileResponse:
         return FileResponse(static_dir / "paper.html", headers={"Cache-Control": "no-store"})
+
+    @app.get("/pnl")
+    async def pnl_page() -> FileResponse:
+        return FileResponse(static_dir / "pnl.html", headers={"Cache-Control": "no-store"})
 
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     return app

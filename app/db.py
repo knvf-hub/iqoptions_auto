@@ -28,6 +28,31 @@ def bangkok_day_range_utc(now: Optional[datetime] = None) -> tuple[str, str, str
     )
 
 
+def bangkok_month_range_utc(month: str) -> tuple[str, str]:
+    bangkok_tz = ZoneInfo("Asia/Bangkok")
+    year_text, month_text = month.split("-", 1)
+    year = int(year_text)
+    month_number = int(month_text)
+    if month_number < 1 or month_number > 12:
+        raise ValueError("month must be in YYYY-MM format")
+    month_start = datetime(year, month_number, 1, tzinfo=bangkok_tz)
+    if month_number == 12:
+        month_end = datetime(year + 1, 1, 1, tzinfo=bangkok_tz)
+    else:
+        month_end = datetime(year, month_number + 1, 1, tzinfo=bangkok_tz)
+    return (
+        month_start.astimezone(timezone.utc).isoformat(timespec="seconds"),
+        month_end.astimezone(timezone.utc).isoformat(timespec="seconds"),
+    )
+
+
+def _parse_utc_timestamp(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -999,6 +1024,103 @@ class Database:
             "open_trades": int(row["open_trades"] or 0),
             "consecutive_losses": consecutive_losses,
             "last_trade_at": last["created_at"] if last else None,
+        }
+
+    def pnl_calendar(self, *, month: str) -> dict[str, Any]:
+        start_utc, end_utc = bangkok_month_range_utc(month)
+        bangkok_tz = ZoneInfo("Asia/Bangkok")
+        with self._lock, self._connect() as db:
+            rows = db.execute(
+                """
+                SELECT closed_at, asset, direction, amount, status, profit
+                FROM trades
+                WHERE status IN ('won', 'lost', 'draw')
+                    AND closed_at IS NOT NULL
+                    AND closed_at >= ?
+                    AND closed_at < ?
+                ORDER BY closed_at ASC, id ASC
+                """,
+                (start_utc, end_utc),
+            ).fetchall()
+
+        days: dict[str, dict[str, Any]] = {}
+        ranking: dict[tuple[str, str], dict[str, Any]] = {}
+        summary = {
+            "profit": 0.0,
+            "volume": 0.0,
+            "positions": 0,
+            "wins": 0,
+            "losses": 0,
+            "draws": 0,
+        }
+
+        for row in rows:
+            closed_local = _parse_utc_timestamp(str(row["closed_at"])).astimezone(bangkok_tz)
+            day_key = closed_local.date().isoformat()
+            profit = float(row["profit"] or 0)
+            amount = float(row["amount"] or 0)
+            status = str(row["status"])
+            direction = str(row["direction"]).upper()
+            asset = str(row["asset"])
+
+            day = days.setdefault(
+                day_key,
+                {
+                    "date": day_key,
+                    "day": closed_local.day,
+                    "weekday": int(closed_local.strftime("%w")),
+                    "profit": 0.0,
+                    "volume": 0.0,
+                    "positions": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "draws": 0,
+                },
+            )
+            item = ranking.setdefault(
+                (asset, direction),
+                {
+                    "asset": asset,
+                    "direction": direction,
+                    "label": f"{asset} {direction}",
+                    "profit": 0.0,
+                    "volume": 0.0,
+                    "positions": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "draws": 0,
+                },
+            )
+
+            for target in (summary, day, item):
+                target["profit"] += profit
+                target["volume"] += amount
+                target["positions"] += 1
+                if status == "won":
+                    target["wins"] += 1
+                elif status == "lost":
+                    target["losses"] += 1
+                elif status == "draw":
+                    target["draws"] += 1
+
+        def finalize(item: dict[str, Any]) -> dict[str, Any]:
+            closed = int(item["wins"] or 0) + int(item["losses"] or 0)
+            volume = float(item["volume"] or 0)
+            item["profit"] = round(float(item["profit"] or 0), 2)
+            item["volume"] = round(volume, 2)
+            item["roi"] = round((item["profit"] / volume) * 100, 2) if volume else 0.0
+            item["win_rate"] = round((float(item["wins"] or 0) / closed) * 100, 2) if closed else 0.0
+            return item
+
+        finalized_days = [finalize(day) for day in days.values()]
+        finalized_days.sort(key=lambda item: str(item["date"]))
+        finalized_ranking = [finalize(item) for item in ranking.values()]
+        finalized_ranking.sort(key=lambda item: (str(item["asset"]), str(item["direction"])))
+        return {
+            "month": month,
+            "summary": finalize(summary),
+            "days": finalized_days,
+            "ranking": finalized_ranking,
         }
 
     def consecutive_losses(

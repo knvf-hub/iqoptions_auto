@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PnL Calendar · IQ Auto Trader</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=20260621-port-icon" />
+    <script>
+      document.documentElement.dataset.theme = localStorage.getItem("iq-auto-theme") || "light";
+    </script>
+    <link rel="stylesheet" href="/static/styles.css?v=20260706-pnl-calendar-v1" />
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+    <script src="/static/pnl.js?v=20260706-pnl-calendar-v1" defer></script>
+  </head>
+  <body>
+    <div class="app-shell pnl-shell">
+      <header class="topbar">
+        <div>
+          <h1>PnL Calendar</h1>
+          <div class="subline">
+            <span class="badge warning">IQOPTION</span>
+            <span class="badge success">PnL</span>
+            <span id="pnlConnectionBadge" class="badge danger">offline</span>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="pnlThemeToggleBtn" class="icon-btn" type="button" title="Switch to dark theme" aria-label="Switch theme" aria-pressed="false">
+            <i data-lucide="moon"></i>
+          </button>
+          <button id="prevMonthBtn" class="icon-btn" type="button" title="Previous month">
+            <i data-lucide="chevron-left"></i>
+          </button>
+          <label class="month-picker" title="Select month">
+            <span>Month</span>
+            <input id="monthInput" type="month" />
+          </label>
+          <button id="nextMonthBtn" class="icon-btn" type="button" title="Next month">
+            <i data-lucide="chevron-right"></i>
+          </button>
+          <a class="btn" href="/" title="Back to trade desk">
+            <i data-lucide="arrow-left"></i><span>Back</span>
+          </a>
+          <button id="refreshPnlBtn" class="icon-btn" type="button" title="Refresh PnL">
+            <i data-lucide="rotate-cw"></i>
+          </button>
+        </div>
+      </header>
+
+      <main class="pnl-layout">
+        <section class="panel pnl-summary-panel">
+          <div class="panel-head">
+            <h2 id="monthTitle">This Month</h2>
+            <span id="pnlStatusBadge" class="badge neutral">loading</span>
+          </div>
+          <div class="pnl-summary-list">
+            <div>
+              <span>This Month's Trading PnL</span>
+              <strong id="monthProfitValue">-</strong>
+            </div>
+            <div>
+              <span>ROI</span>
+              <strong id="monthRoiValue">-</strong>
+            </div>
+            <div>
+              <span>Win Rate</span>
+              <strong id="monthWinRateValue">-</strong>
+            </div>
+            <div>
+              <span>Total Positions</span>
+              <strong id="monthPositionsValue">-</strong>
+            </div>
+            <div>
+              <span>W / L / Draw</span>
+              <strong id="monthBreakdownValue">-</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel pnl-calendar-panel">
+          <div class="calendar-weekdays" aria-hidden="true">
+            <span>S</span>
+            <span>M</span>
+            <span>T</span>
+            <span>W</span>
+            <span>T</span>
+            <span>F</span>
+            <span>S</span>
+          </div>
+          <div id="calendarGrid" class="calendar-grid"></div>
+        </section>
+
+        <section class="panel pnl-ranking-panel">
+          <div class="panel-head">
+            <h2>P&L Ranking</h2>
+            <div class="segmented-control" role="tablist" aria-label="Ranking mode">
+              <button id="rankPnlBtn" class="segment active" type="button">P&L</button>
+              <button id="rankRoiBtn" class="segment" type="button">ROI</button>
+            </div>
+          </div>
+          <div id="rankingList" class="ranking-list"></div>
+        </section>
+      </main>
+
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </div>
+  </body>
+</html>

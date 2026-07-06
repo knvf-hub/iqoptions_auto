@@ -370,6 +370,244 @@ h2 {
   min-width: 880px;
 }
 
+.pnl-shell {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.pnl-layout {
+  max-width: min(1180px, calc(100vw - 36px));
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(300px, 0.95fr) minmax(520px, 1.35fr);
+  grid-template-areas:
+    "summary calendar"
+    "ranking ranking";
+  gap: 14px;
+  align-items: stretch;
+}
+
+.month-picker {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+}
+
+.month-picker span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.month-picker input {
+  width: 138px;
+  height: 30px;
+  border: 0;
+  background: transparent;
+  font-weight: 760;
+  padding: 0;
+}
+
+.pnl-summary-panel {
+  grid-area: summary;
+}
+
+.pnl-summary-list {
+  display: grid;
+  gap: 13px;
+  padding: 8px 0 2px;
+}
+
+.pnl-summary-list > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  align-items: baseline;
+}
+
+.pnl-summary-list span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.pnl-summary-list strong {
+  font-size: 23px;
+  line-height: 1.1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.pnl-calendar-panel {
+  grid-area: calendar;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+}
+
+.calendar-weekdays,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.calendar-weekdays {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 760;
+  text-align: center;
+}
+
+.calendar-grid {
+  gap: 8px;
+}
+
+.calendar-cell {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: 76px;
+  background: var(--panel-soft);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 4px;
+  cursor: default;
+  font-variant-numeric: tabular-nums;
+}
+
+.calendar-cell.positive {
+  background: color-mix(in srgb, var(--green-weak) 72%, var(--panel));
+  border-color: color-mix(in srgb, var(--green) 18%, var(--line));
+}
+
+.calendar-cell.negative {
+  background: color-mix(in srgb, var(--red-weak) 70%, var(--panel));
+  border-color: color-mix(in srgb, var(--red) 20%, var(--line));
+}
+
+.calendar-cell.flat {
+  opacity: 0.78;
+}
+
+.calendar-cell.empty {
+  opacity: 0;
+}
+
+.calendar-day {
+  font-size: 21px;
+  line-height: 1;
+}
+
+.calendar-cell strong {
+  font-size: 15px;
+  line-height: 1.1;
+}
+
+.calendar-cell.positive strong {
+  color: var(--green);
+}
+
+.calendar-cell.negative strong {
+  color: var(--red);
+}
+
+.calendar-cell small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.pnl-ranking-panel {
+  grid-area: ranking;
+}
+
+.segmented-control {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field);
+  display: inline-flex;
+  padding: 3px;
+}
+
+.segment {
+  min-height: 30px;
+  min-width: 74px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 760;
+}
+
+.segment.active {
+  background: var(--neutral-weak);
+  color: var(--text);
+}
+
+.ranking-list {
+  display: grid;
+  gap: 9px;
+  padding-top: 5px;
+}
+
+.ranking-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(260px, 1.4fr) 120px;
+  gap: 16px;
+  align-items: center;
+}
+
+.ranking-contract {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ranking-contract strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ranking-contract span,
+.ranking-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bar-track {
+  height: 16px;
+  border-radius: 999px;
+  background: var(--neutral-weak);
+  overflow: hidden;
+}
+
+.bar-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.bar-track .positive {
+  background: var(--green);
+}
+
+.bar-track .negative {
+  background: var(--red);
+}
+
+.ranking-row > strong {
+  text-align: right;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
 .paper-layout {
   display: grid;
   grid-template-columns: minmax(360px, 0.9fr) minmax(520px, 1.1fr);
@@ -1591,8 +1829,20 @@ td.reason-cell {
 
 @media (max-width: 1120px) {
   .export-layout,
-  .paper-layout {
+  .paper-layout,
+  .pnl-layout {
     grid-template-columns: 1fr;
+  }
+
+  .pnl-layout {
+    grid-template-areas:
+      "summary"
+      "calendar"
+      "ranking";
+  }
+
+  .ranking-row {
+    grid-template-columns: minmax(180px, 0.9fr) minmax(180px, 1fr) 100px;
   }
 
   .layout {
@@ -1645,7 +1895,8 @@ td.reason-cell {
   }
 
   .export-layout,
-  .paper-layout {
+  .paper-layout,
+  .pnl-layout {
     max-width: calc(100vw - 24px);
   }
 
@@ -1680,6 +1931,22 @@ td.reason-cell {
     grid-template-columns: 1fr 1fr;
   }
 
+  .calendar-grid {
+    gap: 5px;
+  }
+
+  .calendar-cell {
+    min-height: 62px;
+  }
+
+  .calendar-day {
+    font-size: 17px;
+  }
+
+  .calendar-cell strong {
+    font-size: 12px;
+  }
+
   h1 {
     font-size: 24px;
   }
@@ -1698,6 +1965,16 @@ td.reason-cell {
   .metrics-grid,
   .control-grid {
     grid-template-columns: 1fr;
+  }
+
+  .pnl-summary-list > div,
+  .ranking-row {
+    grid-template-columns: 1fr;
+  }
+
+  .pnl-summary-list strong,
+  .ranking-row > strong {
+    text-align: left;
   }
 
   .btn span {
