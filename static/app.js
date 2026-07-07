@@ -1266,9 +1266,9 @@ async function toggleAssetDirection(asset, direction) {
 
 async function clearHistory() {
   const confirmed = await confirmDialog({
-    title: "Clear history?",
-    message: "Trade history, signals, events, and dashboard stats will be cleared.",
-    confirmText: "Clear",
+    title: "Clear dashboard view?",
+    message: "This only hides old rows from the current dashboard session. Saved trades and PnL history will stay in the database.",
+    confirmText: "Clear View",
     variant: "danger",
   });
   if (!confirmed) return;
@@ -1281,7 +1281,7 @@ async function clearHistory() {
     renderStatus(result.status || state.status || {});
     await refreshAll({ force: true });
     await loadEvents({ reset: true });
-    showToast(`Cleared ${cleared.trades || 0} trades`);
+    showToast(`View cleared. ${cleared.trades || 0} saved trades kept`);
   } catch (error) {
     showToast(error.message);
   }
@@ -1290,7 +1290,7 @@ async function clearHistory() {
 async function resetStats() {
   const confirmed = await confirmDialog({
     title: "Reset stats?",
-    message: "Dashboard stats will restart from now. Trade history will stay.",
+    message: "Dashboard session stats will restart from now. Saved trades and PnL history will stay.",
     confirmText: "Reset",
   });
   if (!confirmed) return;

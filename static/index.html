@@ -9,9 +9,9 @@
   <script>
     document.documentElement.dataset.theme = localStorage.getItem("iq-auto-theme") || "light";
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=20260701-telegram-source-switch-v1" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260707-clear-view-sala-v1" />
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-  <script src="/static/app.js?v=20260701-telegram-source-switch-v1" defer></script>
+  <script src="/static/app.js?v=20260707-clear-view-sala-v1" defer></script>
 </head>
 
 <body>
@@ -53,7 +53,7 @@
         <button id="logoutBtn" class="btn" type="button" title="Logout and clear broker credentials">
           <i data-lucide="log-out"></i><span>Logout</span>
         </button>
-        <button id="resetStatsBtn" class="btn" type="button" title="Reset dashboard stats">
+        <button id="resetStatsBtn" class="btn" type="button" title="Reset current session stats only">
           <i data-lucide="history"></i><span>Reset Stats</span>
         </button>
         <button id="startBtn" class="btn primary" type="button" title="Start bot">
@@ -256,7 +256,7 @@
                   <i data-lucide="chevron-right"></i>
                 </button>
               </div>
-              <button id="clearHistoryBtn" class="icon-btn danger-outline" type="button" title="Clear history">
+              <button id="clearHistoryBtn" class="icon-btn danger-outline" type="button" title="Clear dashboard view only">
                 <i data-lucide="trash-2"></i>
               </button>
             </div>

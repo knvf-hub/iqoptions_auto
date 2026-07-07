@@ -267,7 +267,8 @@ def create_app() -> FastAPI:
         offset: int = Query(default=0, ge=0),
         status: Optional[str] = None,
     ) -> dict:
-        return {"items": db.list_trades(limit=limit, offset=offset, status=status)}
+        since = None if status == "open" else engine.history_since_at()
+        return {"items": db.list_trades(limit=limit, offset=offset, status=status, since=since)}
 
     @app.get("/api/stats/assets")
     async def asset_stats(
@@ -385,7 +386,7 @@ def create_app() -> FastAPI:
         limit: int = Query(default=20, ge=1, le=100),
         offset: int = Query(default=0, ge=0),
     ) -> dict:
-        return {"items": db.list_events(limit=limit, offset=offset)}
+        return {"items": db.list_events(limit=limit, offset=offset, since=engine.history_since_at())}
 
     @app.get("/api/signals")
     async def signals(limit: int = Query(default=80, ge=1, le=200)) -> dict:

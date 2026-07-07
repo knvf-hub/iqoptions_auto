@@ -385,17 +385,6 @@ class Database:
                 if include_events
                 else 0,
             }
-            db.execute("DELETE FROM trades")
-            db.execute("DELETE FROM signals")
-            db.execute("DELETE FROM telegram_signals")
-            if include_events:
-                db.execute("DELETE FROM events")
-
-            tables = ["trades", "signals", "telegram_signals"]
-            if include_events:
-                tables.append("events")
-            placeholders = ", ".join("?" for _ in tables)
-            db.execute(f"DELETE FROM sqlite_sequence WHERE name IN ({placeholders})", tables)
         return counts
 
     def list_trades(
@@ -404,14 +393,19 @@ class Database:
         limit: int = 50,
         offset: int = 0,
         status: Optional[str] = None,
+        since: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         limit = max(1, min(limit, 200))
         offset = max(0, offset)
         params: list[Any] = []
-        where = ""
+        clauses: list[str] = []
         if status:
-            where = "WHERE status = ?"
+            clauses.append("status = ?")
             params.append(status)
+        if since:
+            clauses.append("created_at >= ?")
+            params.append(since)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.extend([limit, offset])
         with self._lock, self._connect() as db:
             rows = db.execute(
@@ -425,13 +419,19 @@ class Database:
             ).fetchall()
         return [self._decode_row(row) for row in rows]
 
-    def list_events(self, limit: int = 80, offset: int = 0) -> list[dict[str, Any]]:
+    def list_events(self, limit: int = 80, offset: int = 0, *, since: Optional[str] = None) -> list[dict[str, Any]]:
         limit = max(1, min(limit, 200))
         offset = max(0, offset)
+        params: list[Any] = []
+        where = ""
+        if since:
+            where = "WHERE created_at >= ?"
+            params.append(since)
+        params.extend([limit, offset])
         with self._lock, self._connect() as db:
             rows = db.execute(
-                "SELECT * FROM events ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (limit, offset),
+                f"SELECT * FROM events {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                params,
             ).fetchall()
         return [self._decode_row(row) for row in rows]
 

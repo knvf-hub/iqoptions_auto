@@ -43,6 +43,30 @@ class TelegramParserTests(unittest.TestCase):
         self.assertEqual(normalize_active(parsed.active_raw), "ONDOUSD-OTC")
         self.assertEqual(candidate_symbols_for_active(parsed.active_raw)[0], "ONDOUSD-OTC")
 
+    def test_sala_digital_active_label_maps_to_otc_pair(self) -> None:
+        message = """
+        👑 Thailand ⚡
+
+        ⚡ Fuso horário UTC+7 ⚡
+
+        Active: 🎯 Digital | GBP/AUD OTC
+        Expiration: M1
+        Direction: COMPRA
+        Time: 07:20
+        """
+        parsed = parse_signal(message)
+
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.active_raw, "GBP/AUD OTC")
+        self.assertEqual(parsed.direction, "call")
+        self.assertEqual(parsed.expiration, "M1")
+        self.assertEqual(normalize_active(parsed.active_raw), "GBPAUD-OTC")
+        self.assertEqual(candidate_symbols_for_active(parsed.active_raw)[0], "GBPAUD-OTC")
+
+    def test_sala_direction_confirmation_is_not_a_signal(self) -> None:
+        self.assertIsNone(parse_signal("COMPRA=🟢"))
+        self.assertIsNone(parse_signal("VENDA=🔴"))
+
     def test_existing_sala_active_format_still_maps(self) -> None:
         parsed = parse_signal(
             """

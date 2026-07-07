@@ -28,6 +28,7 @@ class TradingEngine:
         self._running = False
         self._started_at: Optional[str] = None
         self._stats_since_at: Optional[str] = self.db.get_state("stats_since_at")
+        self._history_since_at: Optional[str] = self.db.get_state("history_since_at")
         self._last_tick_at: Optional[str] = None
         self._next_tick_at: Optional[str] = None
         self._last_error: Optional[str] = None
@@ -157,20 +158,18 @@ class TradingEngine:
         return self.status()
 
     async def clear_history(self) -> dict[str, Any]:
-        if self._running:
-            raise BrokerError("stop_bot_before_clearing_history")
-        if self.db.count_open_trades() > 0:
-            raise BrokerError("cannot_clear_history_with_open_trades")
-
         counts = self.db.clear_history(include_events=True)
+        now = utc_now()
         self._last_signal = None
         self._last_error = None
         self._last_tick_at = None
         self._next_tick_at = None
-        self._stats_since_at = utc_now()
+        self._history_since_at = now
+        self._stats_since_at = now
+        self.db.set_state("history_since_at", self._history_since_at)
         self.db.set_state("stats_since_at", self._stats_since_at)
-        self.db.add_event("info", "system", "History cleared", counts)
-        return {"cleared": counts, "status": self.status(include_broker=False)}
+        self.db.add_event("info", "system", "Dashboard view cleared", {"hidden_before": now, "existing": counts})
+        return {"cleared": counts, "hidden_before": now, "status": self.status(include_broker=False)}
 
     async def reset_stats(self) -> dict[str, Any]:
         if self.db.count_open_trades() > 0:
@@ -1632,6 +1631,9 @@ class TradingEngine:
     def stats_since_at(self) -> Optional[str]:
         return self._stats_since_at or self._started_at
 
+    def history_since_at(self) -> Optional[str]:
+        return self._history_since_at
+
     async def _refresh_connected_broker_status(self, broker_status: Any) -> dict[str, Any]:
         data = asdict(broker_status)
         refresh_balance = getattr(self._broker, "refresh_balance", None)
@@ -1664,6 +1666,7 @@ class TradingEngine:
             "running": self._running,
             "started_at": self._started_at,
             "stats_since_at": stats_since,
+            "history_since_at": self.history_since_at(),
             "last_tick_at": self._last_tick_at,
             "next_tick_at": self._next_tick_at,
             "last_error": self._last_error,
