@@ -11,6 +11,7 @@ from app.strategies import (
     get_signal,
     highest_high_before_index,
     lowest_low_before_index,
+    strategy_name_for_asset,
     strategy_casinos_put_resistance_wick_rejection,
     strategy_eth_sr_wick_rejection,
     strategy_sp500_sr_bb_exhaustion,
@@ -76,6 +77,15 @@ class StrategyHelperTests(unittest.TestCase):
         self.assertEqual(result["overall"]["total_trades"], 1)
         self.assertEqual(result["overall"]["wins"], 1)
         self.assertEqual(result["overall"]["put_count"], 1)
+
+    def test_adaptive_fx_assets_use_asset_specific_strategy(self) -> None:
+        candles = [candle(i, 100.0, 100.05, 99.95, 100.0) for i in range(90)]
+        candles.append(candle(90, 100.02, 100.08, 99.94, 100.07))
+        signal = get_signal("GBPJPY-OTC", candles, 90)
+
+        self.assertEqual(strategy_name_for_asset("GBPJPY-OTC"), "adaptive_fx_sr_momentum")
+        self.assertEqual(signal.action, "call")
+        self.assertEqual(signal.reason, "adaptive_fx_call_support_wick_rejection")
 
     def test_eth_and_sp500_support_rejection_signals(self) -> None:
         eth = [candle(i, 15, 20, 10, 15.5) for i in range(150)]

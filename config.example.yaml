@@ -23,6 +23,21 @@ trading:
     - ONDOUSD-OTC
     - OpenAI-OTC
     - SP500-OTC
+    - AUDCHF-OTC
+    - AUDNZD-OTC
+    - AUDUSD-OTC
+    - CADJPY-OTC
+    - EURGBP-OTC
+    - EURNZD-OTC
+    - GBPJPY-OTC
+    - GBPNZD-OTC
+    - NZDCAD-OTC
+    - NZDCHF-OTC
+    - NZDJPY-OTC
+    - NZDUSD-OTC
+    - USDCHF-OTC
+    - USDHKD-OTC
+    - USDSGD-OTC
   instrument: binary
   amount: 1.0
   duration_minutes: 1
@@ -114,6 +129,30 @@ trading:
       max_atr_ratio: 0.0012
       min_rsi: 28.0
       max_rsi: 78.0
+    AUDCHF-OTC: &adaptive_fx_rule
+      enabled: true
+      allow_directions:
+        - call
+        - put
+      min_confidence: 0.70
+      min_abs_momentum: 0.00012
+      max_atr_ratio: 0.0012
+      min_rsi: 28.0
+      max_rsi: 78.0
+    AUDNZD-OTC: *adaptive_fx_rule
+    AUDUSD-OTC: *adaptive_fx_rule
+    CADJPY-OTC: *adaptive_fx_rule
+    EURGBP-OTC: *adaptive_fx_rule
+    EURNZD-OTC: *adaptive_fx_rule
+    GBPJPY-OTC: *adaptive_fx_rule
+    GBPNZD-OTC: *adaptive_fx_rule
+    NZDCAD-OTC: *adaptive_fx_rule
+    NZDCHF-OTC: *adaptive_fx_rule
+    NZDJPY-OTC: *adaptive_fx_rule
+    NZDUSD-OTC: *adaptive_fx_rule
+    USDCHF-OTC: *adaptive_fx_rule
+    USDHKD-OTC: *adaptive_fx_rule
+    USDSGD-OTC: *adaptive_fx_rule
   one_open_trade_at_a_time: true
 
 risk:

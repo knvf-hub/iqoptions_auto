@@ -151,6 +151,28 @@ class SP500StrategyConfig:
 
 
 @dataclass(frozen=True)
+class AdaptiveFXStrategyConfig:
+    strategy: str = "adaptive_fx_sr_momentum"
+    support_lookback: int = 80
+    resistance_lookback: int = 80
+    atr_period: int = 14
+    ema_fast_period: int = 9
+    ema_slow_period: int = 21
+    tolerance_atr_multiplier: float = 0.10
+    min_wick_ratio: float = 0.55
+    call_close_pos_min: float = 0.78
+    put_close_pos_max: float = 0.22
+    enable_exhaustion: bool = False
+    exhaustion_streak: int = 4
+    exhaustion_min_body_ratio: float = 0.42
+    enable_momentum: bool = False
+    momentum_streak: int = 3
+    momentum_min_body_ratio: float = 0.55
+    min_atr_ratio: float = 0.0
+    max_atr_ratio: float = 0.006
+
+
+@dataclass(frozen=True)
 class StrategyConfig:
     timeframe_sec: int = 60
     expiry_candles: int = 1
@@ -166,9 +188,27 @@ class StrategyConfig:
     casinos: CasinosStrategyConfig = field(default_factory=CasinosStrategyConfig)
     ethusd: ETHUSDStrategyConfig = field(default_factory=ETHUSDStrategyConfig)
     sp500: SP500StrategyConfig = field(default_factory=SP500StrategyConfig)
+    adaptive_fx: AdaptiveFXStrategyConfig = field(default_factory=AdaptiveFXStrategyConfig)
 
 
 DEFAULT_STRATEGY_CONFIG = StrategyConfig()
+ADAPTIVE_FX_ASSETS = (
+    "AUDCHF-OTC",
+    "AUDNZD-OTC",
+    "AUDUSD-OTC",
+    "CADJPY-OTC",
+    "EURGBP-OTC",
+    "EURNZD-OTC",
+    "GBPJPY-OTC",
+    "GBPNZD-OTC",
+    "NZDCAD-OTC",
+    "NZDCHF-OTC",
+    "NZDJPY-OTC",
+    "NZDUSD-OTC",
+    "USDCHF-OTC",
+    "USDHKD-OTC",
+    "USDSGD-OTC",
+)
 ASSET_STRATEGIES = {
     "GBPUSD-OTC": "gbpusd_sr_wick_rejection_side_tuned",
     "EURJPY-OTC": "eurjpy_streak_exhaustion",
@@ -180,6 +220,7 @@ ASSET_STRATEGIES = {
     "CASINOS-OTC": "put_resistance_wick_rejection",
     "ETHUSD-OTC": "eth_sr_wick_rejection",
     "SP500-OTC": "sp500_sr_bb_exhaustion",
+    **{asset: "adaptive_fx_sr_momentum" for asset in ADAPTIVE_FX_ASSETS},
 }
 
 
@@ -1132,6 +1173,174 @@ def strategy_sp500_accurate_put_only(
     return TradeSignal("hold", 0.0, "sp500_accurate_condition_not_met", candle.close, metrics)
 
 
+def strategy_adaptive_fx_sr_momentum(
+    asset: str,
+    candles: list[Candle],
+    index: int,
+    config: StrategyConfig = DEFAULT_STRATEGY_CONFIG,
+) -> TradeSignal:
+    rule = config.adaptive_fx
+    strategy_name = ASSET_STRATEGIES[asset]
+    required = max(
+        rule.support_lookback,
+        rule.resistance_lookback,
+        rule.atr_period + 1,
+        rule.ema_slow_period,
+        rule.exhaustion_streak if rule.enable_exhaustion else 0,
+        rule.momentum_streak if rule.enable_momentum else 0,
+    )
+    if index < 0 or index >= len(candles):
+        return TradeSignal("hold", 0.0, "not_enough_candles", None, {"strategy": strategy_name})
+
+    candle = candles[index]
+    metrics: dict[str, Any] = {
+        "strategy": strategy_name,
+        "asset": asset,
+        "close": round(candle.close, 6),
+    }
+    if index + 1 < required:
+        metrics["required_closed_candles"] = required
+        return TradeSignal("hold", 0.0, "not_enough_candles", candle.close, metrics)
+
+    close_pos = candle_close_position(candle)
+    body_ratio = candle_body_ratio(candle)
+    wick_ratios = candle_wick_ratios(candle)
+    atr_value = calculate_atr(candles[: index + 1], rule.atr_period)
+    support = lowest_low_before_index(candles, index, rule.support_lookback)
+    resistance = highest_high_before_index(candles, index, rule.resistance_lookback)
+    closes = [item.close for item in candles[: index + 1]]
+    ema_fast = calculate_ema(closes, rule.ema_fast_period)
+    ema_slow = calculate_ema(closes, rule.ema_slow_period)
+    if close_pos is None or body_ratio is None or wick_ratios is None:
+        return TradeSignal("hold", 0.0, "zero_range_candle", candle.close, metrics)
+    if atr_value is None or support is None or resistance is None or ema_fast is None or ema_slow is None:
+        return TradeSignal("hold", 0.0, "indicator_unavailable", candle.close, metrics)
+
+    atr_ratio = atr_value / candle.close if candle.close else 0.0
+    upper_wick_ratio, lower_wick_ratio = wick_ratios
+    tolerance = atr_value * rule.tolerance_atr_multiplier
+    touched_support = candle.low <= support + tolerance
+    touched_resistance = candle.high >= resistance - tolerance
+    bullish_count = count_latest_bullish_candles(candles, index, max(rule.exhaustion_streak, rule.momentum_streak))
+    bearish_count = count_latest_bearish_candles(candles, index, max(rule.exhaustion_streak, rule.momentum_streak))
+    ema_trend = "up" if ema_fast > ema_slow else "down" if ema_fast < ema_slow else "flat"
+    metrics.update(
+        {
+            "close_pos": round(close_pos, 4),
+            "body_ratio": round(body_ratio, 4),
+            "upper_wick_ratio": round(upper_wick_ratio, 4),
+            "lower_wick_ratio": round(lower_wick_ratio, 4),
+            "atr": round(atr_value, 8),
+            "atr_ratio": round(atr_ratio, 8),
+            "support": round(support, 6),
+            "resistance": round(resistance, 6),
+            "tolerance": round(tolerance, 8),
+            "touched_support": touched_support,
+            "touched_resistance": touched_resistance,
+            "bullish_streak_count": bullish_count,
+            "bearish_streak_count": bearish_count,
+            "ema_fast": round(ema_fast, 6),
+            "ema_slow": round(ema_slow, 6),
+            "ema_trend": ema_trend,
+        }
+    )
+
+    if rule.max_atr_ratio > 0 and atr_ratio > rule.max_atr_ratio:
+        return TradeSignal("hold", 0.0, "adaptive_fx_atr_too_hot", candle.close, metrics)
+    if rule.min_atr_ratio > 0 and atr_ratio < rule.min_atr_ratio:
+        return TradeSignal("hold", 0.0, "adaptive_fx_atr_too_quiet", candle.close, metrics)
+
+    if touched_support and lower_wick_ratio >= rule.min_wick_ratio and close_pos >= rule.call_close_pos_min:
+        strength = (lower_wick_ratio - rule.min_wick_ratio) + (close_pos - rule.call_close_pos_min)
+        confidence = 0.70 + min(max(strength, 0.0) * 0.20, 0.17)
+        return TradeSignal(
+            "call",
+            round(min(confidence, 0.87), 3),
+            "adaptive_fx_call_support_wick_rejection",
+            candle.close,
+            metrics,
+        )
+
+    if touched_resistance and upper_wick_ratio >= rule.min_wick_ratio and close_pos <= rule.put_close_pos_max:
+        strength = (upper_wick_ratio - rule.min_wick_ratio) + (rule.put_close_pos_max - close_pos)
+        confidence = 0.70 + min(max(strength, 0.0) * 0.20, 0.17)
+        return TradeSignal(
+            "put",
+            round(min(confidence, 0.87), 3),
+            "adaptive_fx_put_resistance_wick_rejection",
+            candle.close,
+            metrics,
+        )
+
+    if (
+        rule.enable_exhaustion
+        and bearish_count >= rule.exhaustion_streak
+        and body_ratio >= rule.exhaustion_min_body_ratio
+        and close_pos <= rule.put_close_pos_max
+    ):
+        strength = (bearish_count - rule.exhaustion_streak) * 0.03 + body_ratio - rule.exhaustion_min_body_ratio
+        confidence = 0.69 + min(max(strength, 0.0) * 0.18, 0.15)
+        return TradeSignal(
+            "call",
+            round(min(confidence, 0.84), 3),
+            "adaptive_fx_call_bearish_streak_exhaustion",
+            candle.close,
+            metrics,
+        )
+
+    if (
+        rule.enable_exhaustion
+        and bullish_count >= rule.exhaustion_streak
+        and body_ratio >= rule.exhaustion_min_body_ratio
+        and close_pos >= rule.call_close_pos_min
+    ):
+        strength = (bullish_count - rule.exhaustion_streak) * 0.03 + body_ratio - rule.exhaustion_min_body_ratio
+        confidence = 0.69 + min(max(strength, 0.0) * 0.18, 0.15)
+        return TradeSignal(
+            "put",
+            round(min(confidence, 0.84), 3),
+            "adaptive_fx_put_bullish_streak_exhaustion",
+            candle.close,
+            metrics,
+        )
+
+    if (
+        rule.enable_momentum
+        and bullish_count >= rule.momentum_streak
+        and body_ratio >= rule.momentum_min_body_ratio
+        and close_pos >= rule.call_close_pos_min
+        and ema_fast > ema_slow
+    ):
+        strength = (bullish_count - rule.momentum_streak) * 0.02 + body_ratio - rule.momentum_min_body_ratio
+        confidence = 0.70 + min(max(strength, 0.0) * 0.16, 0.14)
+        return TradeSignal(
+            "call",
+            round(min(confidence, 0.84), 3),
+            "adaptive_fx_call_ema_momentum",
+            candle.close,
+            metrics,
+        )
+
+    if (
+        rule.enable_momentum
+        and bearish_count >= rule.momentum_streak
+        and body_ratio >= rule.momentum_min_body_ratio
+        and close_pos <= rule.put_close_pos_max
+        and ema_fast < ema_slow
+    ):
+        strength = (bearish_count - rule.momentum_streak) * 0.02 + body_ratio - rule.momentum_min_body_ratio
+        confidence = 0.70 + min(max(strength, 0.0) * 0.16, 0.14)
+        return TradeSignal(
+            "put",
+            round(min(confidence, 0.84), 3),
+            "adaptive_fx_put_ema_momentum",
+            candle.close,
+            metrics,
+        )
+
+    return TradeSignal("hold", 0.0, "adaptive_fx_condition_not_met", candle.close, metrics)
+
+
 def signal_ondousd_otc(
     candles: list[Candle],
     index: int,
@@ -1228,6 +1437,8 @@ def get_signal(
         if config.sp500.mode == "accurate":
             return strategy_sp500_accurate_put_only(candles, signal_index, config)
         return strategy_sp500_sr_bb_exhaustion(candles, signal_index, config)
+    if asset in ADAPTIVE_FX_ASSETS:
+        return strategy_adaptive_fx_sr_momentum(asset, candles, signal_index, config)
 
     if default_strategy == "legacy_rsi_ema_momentum":
         return legacy_rsi_ema_momentum(candles, signal_index)

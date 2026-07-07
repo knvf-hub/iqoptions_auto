@@ -1099,7 +1099,7 @@ label span {
 }
 
 .compact-table-wrap table {
-  min-width: 640px;
+  min-width: 760px;
 }
 
 .summary-win {
@@ -1141,6 +1141,78 @@ label span {
 .mini-toggle:disabled {
   cursor: wait;
   opacity: 0.5;
+}
+
+.summary-direction-stat {
+  display: grid;
+  gap: 2px;
+  min-width: 104px;
+}
+
+.summary-direction-stat strong {
+  font-size: 13px;
+  line-height: 1.1;
+}
+
+.summary-direction-stat span:last-child {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.summary-check-cell {
+  text-align: center;
+  width: 70px;
+}
+
+.summary-direction-toggle {
+  align-items: center;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+.summary-direction-toggle input {
+  appearance: none;
+  background: var(--field);
+  border: 1px solid var(--hover-line);
+  border-radius: 5px;
+  cursor: pointer;
+  height: 18px;
+  margin: 0;
+  position: relative;
+  width: 18px;
+}
+
+.summary-direction-toggle input:checked {
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.summary-direction-toggle input:checked::after {
+  border: solid var(--on-solid);
+  border-width: 0 2px 2px 0;
+  content: "";
+  height: 9px;
+  left: 6px;
+  position: absolute;
+  top: 2px;
+  transform: rotate(45deg);
+  width: 4px;
+}
+
+.summary-direction-toggle input:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.summary-direction-toggle span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .control-grid {

@@ -77,6 +77,21 @@ class TradingConfig(BaseModel):
             "ONDOUSD-OTC",
             "OpenAI-OTC",
             "SP500-OTC",
+            "AUDCHF-OTC",
+            "AUDNZD-OTC",
+            "AUDUSD-OTC",
+            "CADJPY-OTC",
+            "EURGBP-OTC",
+            "EURNZD-OTC",
+            "GBPJPY-OTC",
+            "GBPNZD-OTC",
+            "NZDCAD-OTC",
+            "NZDCHF-OTC",
+            "NZDJPY-OTC",
+            "NZDUSD-OTC",
+            "USDCHF-OTC",
+            "USDHKD-OTC",
+            "USDSGD-OTC",
         ]
     )
     instrument: str = "binary"

@@ -728,47 +728,69 @@ function renderSummaryFilter(allRows = []) {
 }
 
 function renderAssetStats(items = [], config = {}) {
-  const directionOrder = { call: 0, put: 1 };
   const rules = config.trading?.asset_rules || {};
   const configuredAssets = uniqueAssets(config.trading?.asset, config.trading?.assets || []);
   const telegramMode = Boolean(state.telegram?.follow_signals || config.telegram?.follow_signals);
-  const rowsByPair = new Map();
+  const rowsByAsset = new Map();
+
+  const emptySide = (asset, direction) => ({
+    asset,
+    direction,
+    trades: 0,
+    wins: 0,
+    losses: 0,
+    draws: 0,
+    open_trades: 0,
+    profit: 0,
+    win_rate: 0,
+    avg_confidence: 0,
+  });
+
+  const ensureAsset = (asset) => {
+    if (!rowsByAsset.has(asset)) {
+      rowsByAsset.set(asset, {
+        asset,
+        call: emptySide(asset, "call"),
+        put: emptySide(asset, "put"),
+      });
+    }
+    return rowsByAsset.get(asset);
+  };
 
   if (!telegramMode) {
     for (const asset of configuredAssets) {
-      for (const direction of ["call", "put"]) {
-        const key = `${asset}:${String(direction).toLowerCase()}`;
-        rowsByPair.set(key, {
-          asset,
-          direction: String(direction).toLowerCase(),
-          trades: 0,
-          wins: 0,
-          losses: 0,
-          draws: 0,
-          open_trades: 0,
-          profit: 0,
-          win_rate: 0,
-          avg_confidence: 0,
-        });
-      }
+      ensureAsset(asset);
     }
   }
 
   for (const item of items) {
     const asset = String(item.asset || "").trim();
     const direction = String(item.direction || "").toLowerCase();
-    if (!asset || !direction) continue;
-    rowsByPair.set(`${asset}:${direction}`, { ...item, asset, direction });
+    if (!asset || !["call", "put"].includes(direction)) continue;
+    const row = ensureAsset(asset);
+    row[direction] = { ...emptySide(asset, direction), ...item, asset, direction };
   }
 
-  const sortedItems = [...rowsByPair.values()].sort((left, right) => {
-    const assetCompare = String(left.asset || "").localeCompare(String(right.asset || ""));
-    if (assetCompare !== 0) return assetCompare;
-    const leftDirection = directionOrder[String(left.direction || "").toLowerCase()] ?? 99;
-    const rightDirection = directionOrder[String(right.direction || "").toLowerCase()] ?? 99;
-    if (leftDirection !== rightDirection) return leftDirection - rightDirection;
-    return String(left.direction || "").localeCompare(String(right.direction || ""));
-  });
+  const sortedItems = [...rowsByAsset.values()]
+    .map((row) => {
+      const call = row.call || emptySide(row.asset, "call");
+      const put = row.put || emptySide(row.asset, "put");
+      const callTrades = Number(call.trades || 0);
+      const putTrades = Number(put.trades || 0);
+      const totalTrades = callTrades + putTrades;
+      const avgConfidence = totalTrades
+        ? ((Number(call.avg_confidence || 0) * callTrades) + (Number(put.avg_confidence || 0) * putTrades)) / totalTrades
+        : 0;
+      return {
+        asset: row.asset,
+        call,
+        put,
+        trades: totalTrades,
+        profit: Number(call.profit || 0) + Number(put.profit || 0),
+        avg_confidence: avgConfidence,
+      };
+    })
+    .sort((left, right) => String(left.asset || "").localeCompare(String(right.asset || "")));
   state.assetStatsRaw = sortedItems;
   renderSummaryFilter(sortedItems);
   const filteredItems = state.summarySelectedAssets.size
@@ -779,41 +801,60 @@ function renderAssetStats(items = [], config = {}) {
   if (!body) return;
   body.innerHTML = "";
   if (!filteredItems.length) {
-    body.innerHTML = `<tr><td colspan="8" class="reason-cell">No pair stats yet</td></tr>`;
+    body.innerHTML = `<tr><td colspan="7" class="reason-cell">No pair stats yet</td></tr>`;
     return;
   }
 
   for (const item of filteredItems) {
-    const direction = String(item.direction || "").toLowerCase();
-    const enabled = isAssetDirectionEnabled(rules[item.asset], direction);
     const profit = Number(item.profit || 0);
+    const callEnabled = isAssetDirectionEnabled(rules[item.asset], "call");
+    const putEnabled = isAssetDirectionEnabled(rules[item.asset], "put");
     const row = document.createElement("tr");
     row.innerHTML = `
       <td>${escapeHtml(item.asset)}</td>
-      <td>${direction.toUpperCase()}</td>
-      <td>${item.trades || 0}</td>
-      <td><span class="summary-win">${item.wins || 0}</span>/<span class="summary-loss">${item.losses || 0}</span></td>
-      <td>${pct(item.win_rate)}</td>
+      <td>${renderSummarySide(item.call)}</td>
+      <td class="summary-check-cell">${renderSummaryCheckbox(item.asset, "call", callEnabled)}</td>
+      <td>${renderSummarySide(item.put)}</td>
+      <td class="summary-check-cell">${renderSummaryCheckbox(item.asset, "put", putEnabled)}</td>
       <td class="${profit >= 0 ? "summary-win" : "summary-loss"}">${money(profit)}</td>
       <td>${pct((item.avg_confidence || 0) * 100)}</td>
-      <td>
-        <button
-          class="mini-toggle ${enabled ? "is-on" : "is-off"}"
-          type="button"
-          data-asset-toggle="${escapeHtml(item.asset)}"
-          data-direction-toggle="${escapeHtml(direction)}"
-          title="${escapeHtml(`${item.asset} ${direction.toUpperCase()}`)}"
-        >
-          ${enabled ? "On" : "Off"}
-        </button>
-      </td>
     `;
     body.appendChild(row);
   }
 
-  body.querySelectorAll("[data-asset-toggle]").forEach((button) => {
-    button.addEventListener("click", () => toggleAssetDirection(button.dataset.assetToggle, button.dataset.directionToggle));
+  body.querySelectorAll("[data-asset-toggle]").forEach((input) => {
+    input.addEventListener("change", () => toggleAssetDirection(input.dataset.assetToggle, input.dataset.directionToggle));
   });
+}
+
+function renderSummarySide(side) {
+  const trades = Number(side?.trades || 0);
+  const wins = Number(side?.wins || 0);
+  const losses = Number(side?.losses || 0);
+  const draws = Number(side?.draws || 0);
+  const winRate = pct(side?.win_rate || 0);
+  const suffix = draws ? ` · ${draws} draw` : "";
+  return `
+    <div class="summary-direction-stat">
+      <strong><span class="summary-win">${wins}</span>/<span class="summary-loss">${losses}</span></strong>
+      <span>${trades} trades · ${winRate}${suffix}</span>
+    </div>
+  `;
+}
+
+function renderSummaryCheckbox(asset, direction, enabled) {
+  const label = `${asset} ${direction.toUpperCase()}`;
+  return `
+    <label class="summary-direction-toggle" title="${escapeHtml(label)}">
+      <input
+        type="checkbox"
+        data-asset-toggle="${escapeHtml(asset)}"
+        data-direction-toggle="${escapeHtml(direction)}"
+        ${enabled ? "checked" : ""}
+      />
+      <span>${escapeHtml(direction.toUpperCase())}</span>
+    </label>
+  `;
 }
 
 function isAssetDirectionEnabled(rule, direction) {
@@ -1249,10 +1290,11 @@ async function toggleAssetDirection(asset, direction) {
   const rules = state.status?.config?.trading?.asset_rules || {};
   const enabled = isAssetDirectionEnabled(rules[asset], direction);
   const nextEnabled = !enabled;
-  document
-    .querySelectorAll(`[data-asset-toggle="${CSS.escape(asset)}"][data-direction-toggle="${CSS.escape(direction)}"]`)
-    .forEach((button) => {
-    button.disabled = true;
+  const controls = document.querySelectorAll(
+    `[data-asset-toggle="${CSS.escape(asset)}"][data-direction-toggle="${CSS.escape(direction)}"]`,
+  );
+  controls.forEach((control) => {
+    control.disabled = true;
   });
   try {
     const status = await api("/api/config/asset-rule", {
@@ -1264,6 +1306,10 @@ async function toggleAssetDirection(asset, direction) {
     await loadEvents({ reset: true });
     showToast(`${asset} ${direction.toUpperCase()} ${nextEnabled ? "enabled" : "disabled"}`);
   } catch (error) {
+    controls.forEach((control) => {
+      control.disabled = false;
+      if ("checked" in control) control.checked = enabled;
+    });
     showToast(error.message);
   }
 }
