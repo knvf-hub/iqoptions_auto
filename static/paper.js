@@ -3,6 +3,8 @@ const $ = (selector) => document.querySelector(selector);
 const state = {
   theme: localStorage.getItem("iq-auto-theme") || "light",
   loadingImport: false,
+  loadingToggle: false,
+  enabled: false,
   timer: null,
 };
 
@@ -59,8 +61,10 @@ function statusBadge(status) {
 
 function renderStatus(data) {
   const stats = data.stats || {};
-  setBadge($("#paperStateBadge"), data.running ? "running" : "idle", data.running ? "success" : "neutral");
+  state.enabled = Boolean(data.enabled);
+  setBadge($("#paperStateBadge"), data.enabled ? (data.running ? "running" : "enabled") : "off", data.enabled ? "success" : "danger");
   $("#paperChannel").textContent = data.channel_keyword ? `Channel contains: ${data.channel_keyword}` : "-";
+  $("#paperEnabledText").textContent = data.enabled ? "On" : "Off";
   $("#paperSignals").textContent = stats.signals || 0;
   $("#paperWins").textContent = stats.wins || 0;
   $("#paperLosses").textContent = stats.losses || 0;
@@ -68,6 +72,7 @@ function renderStatus(data) {
   $("#paperPending").textContent = stats.pending || 0;
   $("#paperFiltered").textContent = stats.filtered || 0;
   renderSummary(stats.by_asset || []);
+  renderToggleButton();
 }
 
 function renderSummary(items) {
@@ -144,9 +149,43 @@ function renderImportButton() {
   const button = $("#paperImportBtn");
   if (!button) return;
   button.disabled = state.loadingImport;
-  button.classList.toggle("loading", state.loadingImport);
+  button.classList.toggle("is-loading", state.loadingImport);
   const label = button.querySelector("[data-label]");
   if (label) label.textContent = state.loadingImport ? "Importing..." : "Import 24h";
+}
+
+function renderToggleButton() {
+  const button = $("#paperToggleBtn");
+  if (!button) return;
+  button.disabled = state.loadingToggle;
+  button.classList.toggle("is-loading", state.loadingToggle);
+  button.classList.toggle("primary", !state.enabled);
+  button.classList.toggle("danger-outline", state.enabled);
+  const label = button.querySelector("[data-label]");
+  if (label) {
+    label.textContent = state.loadingToggle ? "Updating..." : state.enabled ? "Disable" : "Enable";
+  }
+}
+
+async function togglePaperMonitor() {
+  if (state.loadingToggle) return;
+  state.loadingToggle = true;
+  renderToggleButton();
+  try {
+    const data = await api("/api/telegram-paper/controls", {
+      method: "POST",
+      body: JSON.stringify({ enabled: !state.enabled }),
+      timeoutMs: 60000,
+    });
+    renderStatus(data);
+    await refreshAll();
+    showToast(`Paper monitor ${data.enabled ? "enabled" : "disabled"}`);
+  } catch (error) {
+    showToast(error.message || "Update failed");
+  } finally {
+    state.loadingToggle = false;
+    renderToggleButton();
+  }
 }
 
 function showToast(message) {
@@ -176,6 +215,7 @@ function init() {
   $("#paperThemeToggleBtn")?.addEventListener("click", toggleTheme);
   $("#paperRefreshBtn")?.addEventListener("click", refreshAll);
   $("#paperImportBtn")?.addEventListener("click", importHistory);
+  $("#paperToggleBtn")?.addEventListener("click", togglePaperMonitor);
   $("#paperStatusFilter")?.addEventListener("change", refreshAll);
   refreshAll().catch((error) => showToast(error.message || "Refresh failed"));
   state.timer = window.setInterval(() => refreshAll().catch(() => {}), 5000);

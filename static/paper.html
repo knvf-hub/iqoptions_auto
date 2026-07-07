@@ -8,9 +8,9 @@
     <script>
       document.documentElement.dataset.theme = localStorage.getItem("iq-auto-theme") || "light";
     </script>
-    <link rel="stylesheet" href="/static/styles.css?v=20260630-paper-v1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260707-workbench-ui-v1" />
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
-    <script src="/static/paper.js?v=20260630-paper-v1" defer></script>
+    <script src="/static/paper.js?v=20260707-workbench-ui-v1" defer></script>
   </head>
   <body>
     <div class="app-shell export-shell paper-shell">
@@ -31,6 +31,10 @@
             <span class="btn-spinner" aria-hidden="true"></span>
             <i data-lucide="history"></i><span data-label>Import 24h</span>
           </button>
+          <button id="paperToggleBtn" class="btn" type="button" title="Enable or disable paper monitor">
+            <span class="btn-spinner" aria-hidden="true"></span>
+            <i data-lucide="power"></i><span data-label>Enable</span>
+          </button>
           <a class="btn" href="/" title="Back to trade desk">
             <i data-lucide="arrow-left"></i><span>Back</span>
           </a>
@@ -45,6 +49,10 @@
           <div class="panel-head">
             <h2>Source</h2>
             <span id="paperChannel" class="muted">-</span>
+          </div>
+          <div class="paper-source-strip">
+            <span>Monitor</span>
+            <strong id="paperEnabledText">Off</strong>
           </div>
           <div class="metric-grid paper-metrics">
             <div class="metric-card"><span>Signals</span><strong id="paperSignals">0</strong></div>

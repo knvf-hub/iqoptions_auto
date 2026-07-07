@@ -128,6 +128,10 @@ class TelegramControlsRequest(BaseModel):
         return value
 
 
+class TelegramPaperControlsRequest(BaseModel):
+    enabled: bool = True
+
+
 class LoginRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=1, max_length=256)
@@ -333,6 +337,10 @@ def create_app() -> FastAPI:
         data = telegram_manager.paper_status()
         data["stats"] = db.telegram_paper_stats(hours=hours)
         return data
+
+    @app.post("/api/telegram-paper/controls")
+    async def update_telegram_paper_controls(payload: TelegramPaperControlsRequest) -> dict:
+        return await telegram_manager.update_paper_controls(enabled=payload.enabled)
 
     @app.get("/api/telegram-paper/signals")
     async def telegram_paper_signals(

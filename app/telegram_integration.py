@@ -334,6 +334,25 @@ class TelegramSignalManager:
         )
         return self.status()
 
+    async def update_paper_controls(self, *, enabled: bool) -> dict[str, Any]:
+        self.config.telegram.paper_enabled = bool(enabled)
+        self.engine.config.telegram.paper_enabled = self.config.telegram.paper_enabled
+        if self._should_listen():
+            await self.start()
+        else:
+            await self.stop()
+        if self.config.telegram.paper_enabled:
+            await self.import_paper_history()
+        self.db.add_event(
+            "info",
+            "telegram_paper",
+            "Telegram paper controls updated",
+            {"enabled": self.config.telegram.paper_enabled},
+        )
+        data = self.paper_status()
+        data["stats"] = self.db.telegram_paper_stats(hours=self.config.telegram.paper_history_hours)
+        return data
+
     def _should_listen(self) -> bool:
         return bool(self.config.telegram.enabled or self.config.telegram.paper_enabled)
 
