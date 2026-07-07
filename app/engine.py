@@ -285,6 +285,7 @@ class TradingEngine:
             self.config.broker.password = ""
             self.config.broker.two_factor_code = ""
             self.db.delete_state(LAST_BROKER_STATUS_STATE_KEY)
+            self._last_broker_status = None
             self._broker = self._build_broker(self.config)
             self._last_broker_status = self.broker_status()
             self._last_error = None
@@ -1617,7 +1618,7 @@ class TradingEngine:
         try:
             status = self._broker.status()
             data = asdict(status)
-            self._set_last_broker_status(data)
+            data = self._set_last_broker_status(data)
             return data
         except Exception as exc:
             data = {
@@ -1627,10 +1628,9 @@ class TradingEngine:
                 "balance": None,
                 "message": str(exc),
             }
-            self._last_broker_status = data
-            return data
+            return self._set_last_broker_status(data)
 
-    def _load_last_broker_status(self) -> Optional[dict[str, Any]]:
+    def _read_persisted_broker_status(self) -> Optional[dict[str, Any]]:
         raw = self.db.get_state(LAST_BROKER_STATUS_STATE_KEY)
         if not raw:
             return None
@@ -1639,13 +1639,25 @@ class TradingEngine:
         except json.JSONDecodeError:
             self.db.delete_state(LAST_BROKER_STATUS_STATE_KEY)
             return None
-        if not isinstance(data, dict):
+        return data if isinstance(data, dict) else None
+
+    def _load_last_broker_status(self) -> Optional[dict[str, Any]]:
+        data = self._read_persisted_broker_status()
+        if data is None:
             return None
         data["connected"] = False
         data["message"] = data.get("message") or "cached balance"
         return data
 
     def _set_last_broker_status(self, data: dict[str, Any]) -> dict[str, Any]:
+        if data.get("balance") is None:
+            cached = self._last_broker_status if (self._last_broker_status or {}).get("balance") is not None else None
+            if cached is None:
+                cached = self._read_persisted_broker_status()
+            same_account = not cached or cached.get("account_type") == data.get("account_type")
+            if cached and same_account and cached.get("balance") is not None:
+                data["balance"] = cached.get("balance")
+                data["message"] = data.get("message") or "cached balance"
         self._last_broker_status = data
         if data.get("balance") is not None:
             self.db.set_state(LAST_BROKER_STATUS_STATE_KEY, json.dumps(data, default=str))
