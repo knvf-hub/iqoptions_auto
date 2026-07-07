@@ -15,6 +15,7 @@ from app.selector import CandidateSignal, scan_and_select
 
 
 STRATEGY_MARTINGALE_STATE_KEY = "strategy_martingale_pending"
+LAST_BROKER_STATUS_STATE_KEY = "last_broker_status"
 STRATEGY_MARTINGALE_MULTIPLIERS = (1.0, 1.5, 4.0)
 STALE_SETTLEMENT_GRACE_SEC = 180
 
@@ -33,7 +34,7 @@ class TradingEngine:
         self._next_tick_at: Optional[str] = None
         self._last_error: Optional[str] = None
         self._last_signal: Optional[dict[str, Any]] = None
-        self._last_broker_status: Optional[dict[str, Any]] = None
+        self._last_broker_status: Optional[dict[str, Any]] = self._load_last_broker_status()
         self._last_skip_reason: Optional[str] = None
         self._martingale_enabled_at: Optional[str] = (
             self._tracking_timestamp()
@@ -283,6 +284,7 @@ class TradingEngine:
             self.config.broker.email = ""
             self.config.broker.password = ""
             self.config.broker.two_factor_code = ""
+            self.db.delete_state(LAST_BROKER_STATUS_STATE_KEY)
             self._broker = self._build_broker(self.config)
             self._last_broker_status = self.broker_status()
             self._last_error = None
@@ -399,7 +401,7 @@ class TradingEngine:
             except asyncio.TimeoutError:
                 self.db.add_event("warning", "bot", "Stop returned before tick cancellation finished", {})
 
-        await self._safe_reset_broker(reason="after_stop")
+        await self._safe_reset_broker(reason="after_stop", preserve_last_status=True)
         
         return self.status(include_broker=False)
 
@@ -1217,7 +1219,7 @@ class TradingEngine:
             return
         try:
             status = await asyncio.wait_for(asyncio.to_thread(refresh_balance), timeout=3)
-            self._last_broker_status = asdict(status)
+            self._set_last_broker_status(asdict(status))
             self.db.add_event(
                 "info",
                 "broker",
@@ -1615,7 +1617,7 @@ class TradingEngine:
         try:
             status = self._broker.status()
             data = asdict(status)
-            self._last_broker_status = data
+            self._set_last_broker_status(data)
             return data
         except Exception as exc:
             data = {
@@ -1627,6 +1629,36 @@ class TradingEngine:
             }
             self._last_broker_status = data
             return data
+
+    def _load_last_broker_status(self) -> Optional[dict[str, Any]]:
+        raw = self.db.get_state(LAST_BROKER_STATUS_STATE_KEY)
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            self.db.delete_state(LAST_BROKER_STATUS_STATE_KEY)
+            return None
+        if not isinstance(data, dict):
+            return None
+        data["connected"] = False
+        data["message"] = data.get("message") or "cached balance"
+        return data
+
+    def _set_last_broker_status(self, data: dict[str, Any]) -> dict[str, Any]:
+        self._last_broker_status = data
+        if data.get("balance") is not None:
+            self.db.set_state(LAST_BROKER_STATUS_STATE_KEY, json.dumps(data, default=str))
+        return data
+
+    def _cached_broker_status(self, *, message: str) -> dict[str, Any]:
+        cached = dict(self._last_broker_status or {})
+        cached.setdefault("mode", self.config.broker.mode)
+        cached.setdefault("account_type", self.config.broker.account_type)
+        cached.setdefault("balance", None)
+        cached["connected"] = False
+        cached["message"] = message
+        return cached
 
     def stats_since_at(self) -> Optional[str]:
         return self._stats_since_at or self._started_at
@@ -1648,6 +1680,7 @@ class TradingEngine:
         except Exception as exc:
             data["message"] = str(exc)
             self.db.add_event("warning", "broker", "Balance refresh failed", {"error": str(exc)})
+        self._set_last_broker_status(data)
         return data
 
     def status(self, *, include_broker: bool = True) -> dict[str, Any]:
@@ -1675,18 +1708,13 @@ class TradingEngine:
             "martingale": self._martingale_state(),
             "broker": self.broker_status()
             if include_broker
-            else {
-                "connected": False,
-                "mode": self.config.broker.mode,
-                "account_type": self.config.broker.account_type,
-                "balance": None,
-                "message": "stop requested",
-            },
+            else self._cached_broker_status(message="stop requested"),
             "stats": session_stats,
         }
     
-    async def _safe_reset_broker(self, *, reason: str = "reset_broker") -> None:
+    async def _safe_reset_broker(self, *, reason: str = "reset_broker", preserve_last_status: bool = False) -> None:
         old_broker = self._broker
+        previous_status = dict(self._last_broker_status or {})
 
         for method_name in ("disconnect", "close", "logout"):
             method = getattr(old_broker, method_name, None)
@@ -1712,7 +1740,11 @@ class TradingEngine:
                 break
 
         self._broker = self._build_broker(self.config)
-        self._last_broker_status = self.broker_status()
+        reset_status = self.broker_status()
+        if preserve_last_status and reset_status.get("balance") is None and previous_status.get("balance") is not None:
+            reset_status["balance"] = previous_status.get("balance")
+            reset_status["account_type"] = previous_status.get("account_type", reset_status.get("account_type"))
+        self._set_last_broker_status(reset_status)
 
     def _broker_expiry_at(self, duration_minutes: int, now: Optional[datetime] = None) -> str:
         now = now or datetime.now(timezone.utc)

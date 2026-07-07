@@ -28,6 +28,7 @@ const state = {
   clockTimer: null,
   settlePending: false,
   lastSettleAttemptAt: 0,
+  lastBalance: null,
   equityHoverIndex: null,
   equityChartPoints: [],
   equityPlotArea: null,
@@ -471,7 +472,10 @@ function renderStatus(status) {
   runningState.className = `state-dot ${status.running ? "running" : "stopped"}`;
   renderBotControls(status);
 
-  $("#balanceValue").textContent = money(broker.balance);
+  if (broker.balance !== null && broker.balance !== undefined && Number.isFinite(Number(broker.balance))) {
+    state.lastBalance = Number(broker.balance);
+  }
+  $("#balanceValue").textContent = money(broker.balance ?? state.lastBalance);
   const todayProfit = Number(
     stats.today_profit ??
     stats.daily_profit ??
