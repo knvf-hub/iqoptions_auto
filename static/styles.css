@@ -253,6 +253,23 @@ h2 {
   background: var(--red-weak);
 }
 
+.logout-action {
+  border-color: color-mix(in srgb, var(--red) 46%, var(--line));
+  background: color-mix(in srgb, var(--red) 9%, var(--panel));
+  color: var(--red);
+  font-weight: 780;
+}
+
+.logout-action svg {
+  stroke-width: 2.4;
+}
+
+.logout-action:hover {
+  border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 18%, var(--panel));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 18%, transparent);
+}
+
 .layout {
   max-width: min(2200px, calc(100vw - 56px));
   margin: 0 auto;
